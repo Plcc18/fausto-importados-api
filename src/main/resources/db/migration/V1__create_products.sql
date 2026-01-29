@@ -24,7 +24,10 @@ CREATE TABLE products (
   original_price NUMERIC(10,2),
   image TEXT NOT NULL,
   featured BOOLEAN DEFAULT FALSE,
-  in_stock BOOLEAN NOT NULL
+  in_stock BOOLEAN NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP,
+  active BOOLEAN NOT NULL DEFAULT TRUE
 );
 
 CREATE TABLE users (
@@ -32,5 +35,5 @@ CREATE TABLE users (
   email VARCHAR(150) UNIQUE NOT NULL,
   password TEXT NOT NULL,
   role VARCHAR(30) NOT NULL,
-  active BOOLEAN DEFAULT TRUE,
-);
+  active BOOLEAN DEFAULT TRUE
+)

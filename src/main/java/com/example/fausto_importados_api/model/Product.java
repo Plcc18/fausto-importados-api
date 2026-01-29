@@ -5,9 +5,13 @@ import com.example.fausto_importados_api.model.enums.OlfactiveFamily;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import lombok.Data;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
@@ -28,27 +32,29 @@ public class Product {
     private String brand;
 
     @NotBlank(message = "Description is mandatory!")
-    @Column(nullable = false)
+    @Column(nullable = false, columnDefinition = "TEXT")
     private String description;
 
-    @NotBlank(message = "OlfactiveFamily is mandatory!")
+    @NotNull(message = "OlfactiveFamily is mandatory!")
+    @Enumerated(EnumType.STRING)
     @Column(name = "olfactive_family", nullable = false)
-    @Enumerated(EnumType.STRING)
-    private OlfactiveFamily olfactivefamily;
+    private OlfactiveFamily olfactiveFamily;
 
-    @NotBlank(message = "Category is mandatory!")
-    @Column(name = "category")
+    @NotNull(message = "Category is mandatory!")
     @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
     private Category category;
 
     @NotBlank(message = "Size is mandatory!")
     @Column(nullable = false, length = 50)
     private String size;
 
-    @NotBlank(message = "Price is mandatory!")
+    @NotNull(message = "Price is mandatory!")
+    @Positive
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal price;
 
+    @Positive
     @Column(name = "original_price", precision = 10, scale = 2)
     private BigDecimal originalPrice;
 
@@ -56,10 +62,24 @@ public class Product {
     @Column(nullable = false, columnDefinition = "TEXT")
     private String image;
 
-    @Column(columnDefinition = "BOOLEAN DEFAULT FALSE")
+    @NotNull
+    @Column(nullable = false)
     private Boolean featured = false;
 
     @NotNull(message = "In stock is mandatory")
     @Column(name = "in_stock", nullable = false)
     private Boolean inStock;
+
+    @NotNull
+    @Column(nullable = false)
+    private Boolean active = true;
+
+    @CreationTimestamp
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private LocalDateTime createdAt;
+
+    @UpdateTimestamp
+    @Column(name = "updated_at")
+    private LocalDateTime updatedAt;
 }
+
