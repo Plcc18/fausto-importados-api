@@ -26,8 +26,8 @@ class ProductRepositoryTest {
         p.setName("Dior Sauvage");
         p.setBrand("Dior");
         p.setDescription("Perfume masculino");
-        p.setCategory(Category.masculino);
-        p.setOlfactiveFamily(OlfactiveFamily.amadeirado);
+        p.setCategory(Category.MASCULINO);
+        p.setOlfactiveFamily(OlfactiveFamily.AMADEIRADO);
         p.setSize("100ml");
         p.setPrice(new BigDecimal("599.90"));
         p.setOriginalPrice(new BigDecimal("699.90"));
@@ -85,14 +85,14 @@ class ProductRepositoryTest {
     void deveFiltrarPorCategoria() {
         Product masculino = criarProdutoValido();
         Product feminino = criarProdutoValido();
-        feminino.setCategory(Category.feminino);
+        feminino.setCategory(Category.FEMININO);
 
         productRepository.save(masculino);
         productRepository.save(feminino);
 
         Page<Product> result =
                 productRepository.findByCategoryAndActiveTrue(
-                        Category.masculino,
+                        Category.MASCULINO,
                         PageRequest.of(0, 10)
                 );
 

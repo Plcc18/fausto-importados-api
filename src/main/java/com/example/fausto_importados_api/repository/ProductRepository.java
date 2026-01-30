@@ -49,5 +49,7 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
             @Param("term") String term,
             Pageable pageable
     );
+
+    boolean existsByName(String name);
 }
 
