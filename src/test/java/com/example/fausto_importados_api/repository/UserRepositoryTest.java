@@ -23,7 +23,7 @@ class UserRepositoryTest {
         user.setEmail("teste@email.com");
         user.setPassword("123");
         user.setActive(true);
-        user.setRole(Role.admin);
+        user.setRole(Role.ADMIN);
 
         userRepository.save(user);
 
