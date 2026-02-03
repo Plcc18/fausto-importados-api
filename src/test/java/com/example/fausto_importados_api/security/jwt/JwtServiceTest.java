@@ -102,7 +102,7 @@ class JwtServiceTest {
         assertThat(valid).isFalse();
     }
 
-    //token alterado pe inválido
+    //token alterado é inválido
     @Test
     void shouldReturnFalseForInvalidToken() {
         when(userDetails.getUsername()).thenReturn("pedro");

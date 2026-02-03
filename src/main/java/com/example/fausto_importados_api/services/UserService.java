@@ -36,11 +36,11 @@ public class UserService {
                 );
     }
 
-    // criação do admin (apenas umas vez)
+    // criação do admin
     public User createAdmin(User user) {
 
-        if (userRepository.existsByRole(Role.ADMIN)) {
-            throw new BusinessException("Admin already registered");
+        if (userRepository.existsByEmail(user.getEmail())) {
+            throw new BusinessException("Email already registered");
         }
 
         User admin = buildAdmin(user);
@@ -51,9 +51,9 @@ public class UserService {
     private User buildAdmin(User input) {
         User admin = new User();
         admin.setEmail(input.getEmail());
-        admin.setPassword(input.getPassword());
-
         admin.setPassword(passwordEncoder.encode(input.getPassword()));
+        admin.setRole(Role.ADMIN);
+        admin.setActive(true);
 
         return admin;
     }

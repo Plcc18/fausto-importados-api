@@ -15,6 +15,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.util.Optional;
 
+import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
@@ -63,6 +64,23 @@ class UserServiceTest {
     }
 
     @Test
+    void shouldThrowExceptionWhenEmailAlreadyExists() {
+        User input = new User();
+        input.setEmail("admin@example.com");
+        input.setPassword("123456");
+
+        when(userRepository.existsByEmail(input.getEmail()))
+                .thenReturn(true);
+
+        assertThrows(BusinessException.class, () ->
+                userService.createAdmin(input)
+        );
+
+        verify(userRepository).existsByEmail("admin@example.com");
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
     void shouldCreateAdminSuccessfully() {
         User input = new User();
         input.setEmail("admin@example.com");
@@ -89,17 +107,30 @@ class UserServiceTest {
     }
 
     @Test
-    void shouldThrowExceptionWhenAdminAlreadyExist() {
+    void shouldCreateAdminDuplicatedSuccessfully() {
         User input = new User();
+        input.setEmail("admin2@email.com");
+        input.setPassword("123456");
 
-        when(userRepository.existsByRole(Role.ADMIN))
-                .thenReturn(true);
+        when(userRepository.existsByEmail(input.getEmail()))
+                .thenReturn(false);
 
-        assertThrows(BusinessException.class, () ->
-                userService.createAdmin(input)
-        );
+        when(passwordEncoder.encode("123456"))
+                .thenReturn("senhaCriptografada");
 
-        verify(userRepository).existsByRole(Role.ADMIN);
-        verify(userRepository, never()).save(any());
+        when(userRepository.save(any(User.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        User saved = userService.createAdmin(input);
+
+        assertThat(saved).isNotNull();
+        assertThat(saved.getEmail()).isEqualTo("admin2@email.com");
+        assertThat(saved.getPassword()).isEqualTo("senhaCriptografada");
+        assertThat(saved.getRole()).isEqualTo(Role.ADMIN);
+        assertThat(saved.getActive()).isTrue();
+
+        verify(userRepository).existsByEmail("admin2@email.com");
+        verify(userRepository).save(any(User.class));
     }
+
 }
