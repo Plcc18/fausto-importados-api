@@ -70,6 +70,8 @@ class JwtServiceTest {
     //token válido
     @Test
     void shoudValidTokenSuccesfully() {
+        JwtService jwtService =
+                new JwtService(SECRET, 1000 * 60);
         when(userDetails.getUsername()).thenReturn("pedro");
         when(userDetails.getAuthorities())
                 .thenAnswer(invocation ->
@@ -80,7 +82,7 @@ class JwtServiceTest {
 
         boolean valid = jwtService.isTokenValid(token);
 
-        assertThat(valid).isTrue();
+        assertThat(jwtService.isTokenValid(token)).isTrue();
     }
 
     //token expirado é inválido

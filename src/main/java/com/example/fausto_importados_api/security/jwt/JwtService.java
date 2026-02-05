@@ -8,6 +8,7 @@ import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
 
@@ -52,12 +53,19 @@ public class JwtService {
 
     public boolean isTokenValid(String token) {
         try {
-            getAllClaims(token);
-            return !isTokenExpired(token);
-        } catch (JwtException e) {
+            Claims claims = getAllClaims(token);
+            return claims.getExpiration().after(new Date());
+        } catch (JwtException | IllegalArgumentException e) {
             return false;
         }
     }
+
+    public boolean isTokenValid(String token, UserDetails userDetails) {
+        String username = extractUsername(token);
+        return username.equals(userDetails.getUsername())
+                && isTokenValid(token);
+    }
+
 
     public <T> T extractClaim(String token, Function<Claims, T> resolver) {
         return resolver.apply(getAllClaims(token));
@@ -69,6 +77,10 @@ public class JwtService {
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
+    }
+
+    public String extractUsername(String token) {
+        return getSubject(token);
     }
 }
 
