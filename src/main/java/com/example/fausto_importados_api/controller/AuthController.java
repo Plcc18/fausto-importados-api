@@ -3,6 +3,7 @@ package com.example.fausto_importados_api.controller;
 import com.example.fausto_importados_api.dto.auth.JwtRequestDTO;
 import com.example.fausto_importados_api.dto.auth.JwtResponseDTO;
 import com.example.fausto_importados_api.security.jwt.JwtService;
+import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -30,13 +31,13 @@ public class AuthController {
 
     @PostMapping("/login")
     public ResponseEntity<JwtResponseDTO> login(
-            @RequestBody
+            @Valid @RequestBody
             JwtRequestDTO request
             ) {
 
         Authentication authentication = authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(
-                        request.username(),
+                        request.email(),
                         request.password()
                 )
         );

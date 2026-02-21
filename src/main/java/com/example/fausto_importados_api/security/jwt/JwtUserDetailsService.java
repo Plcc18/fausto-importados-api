@@ -2,10 +2,13 @@ package com.example.fausto_importados_api.security.jwt;
 
 import com.example.fausto_importados_api.services.UserService;
 import com.example.fausto_importados_api.services.exception.ResourceNotFoundException;
+import org.springframework.context.annotation.Bean;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.stereotype.Service;
 
+@Service
 public class JwtUserDetailsService implements UserDetailsService {
     private final UserService userService;
 

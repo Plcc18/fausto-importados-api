@@ -5,21 +5,23 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.lang.NonNull;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
+import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.logging.Logger;
 
+@Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private static final Logger logger =
-            (Logger) LoggerFactory.getLogger(JwtAuthenticationFilter.class);
+           LoggerFactory.getLogger(JwtAuthenticationFilter.class);
 
     private final JwtUserDetailsService userDetailsService;
     private final JwtService jwtService;
@@ -69,9 +71,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     }
                 }
             } catch (ExpiredJwtException e) {
-                logger.warning("JWT token expired");
+                logger.warn("JWT token expired");
             } catch (Exception e) {
-                logger.warning("Invalid JWT token");
+                logger.warn("Invalid JWT token");
             }
         }
         filterChain.doFilter(request, response);
