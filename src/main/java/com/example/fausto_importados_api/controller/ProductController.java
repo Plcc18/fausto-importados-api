@@ -144,7 +144,7 @@ public class ProductController {
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse> deleteProduct(@PathVariable UUID id) {
-        Product p = productService.findActiveById(id);
+        productService.delete(id);
 
         return ResponseEntity.ok(
                 new ApiResponse(

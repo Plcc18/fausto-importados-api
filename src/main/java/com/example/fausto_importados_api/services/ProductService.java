@@ -100,6 +100,12 @@ public class ProductService {
         }
     }
 
+    public void delete(UUID id) {
+        Product product = findActiveById(id);
+        product.setActive(false);
+        productRepository.save(product);
+    }
+
     public Product updatePartial(UUID id, ProductUpdateDTO dto) {
 
         Product product = productRepository.findById(id)
