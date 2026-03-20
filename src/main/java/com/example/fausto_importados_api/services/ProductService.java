@@ -1,5 +1,6 @@
 package com.example.fausto_importados_api.services;
 
+import com.example.fausto_importados_api.dto.auth.ProductUpdateDTO;
 import com.example.fausto_importados_api.model.Product;
 import com.example.fausto_importados_api.model.enums.Category;
 import com.example.fausto_importados_api.model.enums.OlfactiveFamily;
@@ -89,7 +90,7 @@ public class ProductService {
 
     private void validateDuplicate(Product product) {
         if (productRepository.existsByName(product.getName())) {
-            throw new BusinessException("Product alredy exists");
+            throw new BusinessException("Product already exists");
         }
     }
 
@@ -97,5 +98,26 @@ public class ProductService {
         if (product.getId() != null) {
             throw new BusinessException("Product id must not be informed on cration");
         }
+    }
+
+    public Product updatePartial(UUID id, ProductUpdateDTO dto) {
+
+        Product product = productRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Produto não encontrado"));
+
+        if (dto.getName() != null) product.setName(dto.getName());
+        if (dto.getBrand() != null) product.setBrand(dto.getBrand());
+        if (dto.getDescription() != null) product.setDescription(dto.getDescription());
+        if (dto.getOlfactiveFamily() != null) product.setOlfactiveFamily(dto.getOlfactiveFamily());
+        if (dto.getCategory() != null) product.setCategory(dto.getCategory());
+        if (dto.getSize() != null) product.setSize(dto.getSize());
+        if (dto.getPrice() != null) product.setPrice(dto.getPrice());
+        if (dto.getOriginalPrice() != null) product.setOriginalPrice(dto.getOriginalPrice());
+        if (dto.getImage() != null) product.setImage(dto.getImage());
+        if (dto.getFeatured() != null) product.setFeatured(dto.getFeatured());
+        if (dto.getInStock() != null) product.setInStock(dto.getInStock());
+        if (dto.getActive() != null) product.setActive(dto.getActive());
+
+        return productRepository.save(product);
     }
 }
