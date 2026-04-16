@@ -5,14 +5,17 @@ import com.example.fausto_importados_api.model.Product;
 import com.example.fausto_importados_api.model.enums.Category;
 import com.example.fausto_importados_api.model.enums.OlfactiveFamily;
 import com.example.fausto_importados_api.services.ProductService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -24,6 +27,8 @@ public class ProductController {
 
     @Autowired
     private ProductService productService;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     // DTO de resposta do produto
     public record ProductDTO(
@@ -45,28 +50,27 @@ public class ProductController {
     // DTO de resposta padrão
     public record ApiResponse(String timeStamp, String message) {}
 
-    // GET todos os produtos ativos (público)
+    // ======================
+    // GETs públicos
+    // ======================
     @GetMapping
     public ResponseEntity<Page<Product>> getAllActiveProducts(Pageable pageable) {
         Page<Product> products = productService.findAllActive(pageable);
         return ResponseEntity.ok(products);
     }
 
-    // GET produto por ID (público)
     @GetMapping("/{id}")
     public ResponseEntity<ProductDTO> getProduct(@PathVariable UUID id) {
         Product p = productService.findActiveById(id);
         return ResponseEntity.ok(mapToDTO(p));
     }
 
-    // GET produtos em destaque (público)
     @GetMapping("/featured")
     public ResponseEntity<Page<Product>> getFeaturedProducts(Pageable pageable) {
         Page<Product> products = productService.findFeatured(pageable);
         return ResponseEntity.ok(products);
     }
 
-    // GET produtos por categoria (público)
     @GetMapping("/category/{category}")
     public ResponseEntity<Page<Product>> getProductsByCategory(
             @PathVariable Category category,
@@ -76,7 +80,6 @@ public class ProductController {
         return ResponseEntity.ok(products);
     }
 
-    // GET produtos por família olfativa (público)
     @GetMapping("/olfactive-family/{olfactiveFamily}")
     public ResponseEntity<Page<Product>> getProductsByOlfactiveFamily(
             @PathVariable OlfactiveFamily olfactiveFamily,
@@ -86,52 +89,68 @@ public class ProductController {
         return ResponseEntity.ok(products);
     }
 
-    // POST - Criar novo produto (apenas ADMIN)
+    // ======================
+    // POST - Criar produto com imagem
+    // ======================
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<ApiResponse> postProduct(@Valid @RequestBody Product p) {
+    public ResponseEntity<ApiResponse> postProduct(
+            @Valid @RequestBody Product p
+    ) {
         productService.save(p);
 
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(new ApiResponse(
-                        Instant.now().toString(),
-                        "Product created successfully"
-                ));
+                .body(new ApiResponse(Instant.now().toString(), "Product created successfully"));
     }
 
-    // PUT - Atualizar produto (apenas ADMIN)
-    @PutMapping("/{id}")
+    // ======================
+    // PUT - Atualizar produto
+    // ======================
+    @PutMapping(value = "/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse> putProduct(
             @PathVariable UUID id,
-            @Valid @RequestBody Product p
+            @RequestPart("product") String productJson,
+            @RequestPart(value = "image", required = false) MultipartFile file
     ) {
-        Product existing = productService.findActiveById(id);
+        try {
+            Product existing = productService.findActiveById(id);
 
-        existing.setName(p.getName());
-        existing.setBrand(p.getBrand());
-        existing.setDescription(p.getDescription());
-        existing.setOlfactiveFamily(p.getOlfactiveFamily());
-        existing.setCategory(p.getCategory());
-        existing.setSize(p.getSize());
-        existing.setPrice(p.getPrice());
-        existing.setOriginalPrice(p.getOriginalPrice());
-        existing.setImage(p.getImage());
-        existing.setFeatured(p.getFeatured());
-        existing.setInStock(p.getInStock());
-        existing.setActive(p.getActive());
+            Product p = objectMapper.readValue(productJson, Product.class);
 
-        productService.save(existing);
+            existing.setName(p.getName());
+            existing.setBrand(p.getBrand());
+            existing.setDescription(p.getDescription());
+            existing.setOlfactiveFamily(p.getOlfactiveFamily());
+            existing.setCategory(p.getCategory());
+            existing.setSize(p.getSize());
+            existing.setPrice(p.getPrice());
+            existing.setOriginalPrice(p.getOriginalPrice());
+            existing.setFeatured(p.getFeatured());
+            existing.setInStock(p.getInStock());
+            existing.setActive(p.getActive());
 
-        return ResponseEntity.ok(
-                new ApiResponse(
-                        Instant.now().toString(),
-                        "Product updated successfully"
-                )
-        );
+            if (file != null && !file.isEmpty()) {
+                String imageUrl = productService.uploadImage(file);
+                existing.setImage(imageUrl);
+            }
+
+            productService.update(existing);
+
+            return ResponseEntity.ok(
+                    new ApiResponse(Instant.now().toString(), "Product updated successfully")
+            );
+
+        } catch (Exception e) {
+            throw new RuntimeException("Erro ao atualizar produto", e);
+        }
     }
 
+    // ======================
+    // PATCH - Atualização parcial
+    // ======================
     @PatchMapping("/{id}")
+    //@PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Product> updatePartial(
             @PathVariable UUID id,
             @RequestBody ProductUpdateDTO dto
@@ -140,20 +159,21 @@ public class ProductController {
         return ResponseEntity.ok(updated);
     }
 
-    // DELETE - Deletar produto (apenas ADMIN)
+    // ======================
+    // DELETE - Deletar produto
+    // ======================
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse> deleteProduct(@PathVariable UUID id) {
         productService.delete(id);
-
         return ResponseEntity.ok(
-                new ApiResponse(
-                        Instant.now().toString(),
-                        "Product deleted successfully"
-                )
+                new ApiResponse(Instant.now().toString(), "Product deleted successfully")
         );
     }
 
+    // ======================
+    // Mapper
+    // ======================
     private ProductDTO mapToDTO(Product product) {
         return new ProductDTO(
                 product.getId(),

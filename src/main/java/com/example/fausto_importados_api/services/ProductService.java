@@ -1,5 +1,6 @@
 package com.example.fausto_importados_api.services;
 
+import com.cloudinary.Cloudinary;
 import com.example.fausto_importados_api.dto.auth.ProductUpdateDTO;
 import com.example.fausto_importados_api.model.Product;
 import com.example.fausto_importados_api.model.enums.Category;
@@ -10,17 +11,36 @@ import com.example.fausto_importados_api.services.exception.ResourceNotFoundExce
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.math.BigDecimal;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
 public class ProductService {
 
     private final ProductRepository productRepository;
+    private final Cloudinary cloudinary;
 
-    public ProductService(ProductRepository productRepository) {
+    public ProductService(ProductRepository productRepository, Cloudinary cloudinary) {
         this.productRepository = productRepository;
+        this.cloudinary = cloudinary;
+    }
+
+    public String uploadImage(MultipartFile file) {
+        try {
+            Map<?, ?> uploadResult = cloudinary.uploader().upload(
+                    file.getBytes(),
+                    Map.of()
+            );
+
+            return uploadResult.get("secure_url").toString();
+
+        } catch (IOException e) {
+            throw new RuntimeException("Erro ao fazer upload da imagem", e);
+        }
     }
 
     public Page<Product> findAllActive(Pageable pageable) {
@@ -57,6 +77,15 @@ public class ProductService {
         product.setActive(true);
         return productRepository.save(product);
     }
+
+    public Product update(Product product) {
+        validateName(product);
+        validatePrice(product);
+        validateCategory(product);
+        // sem validateId e sem validateDuplicate aqui
+        return productRepository.save(product);
+    }
+
     private void validateProduct(Product product) {
         validateName(product);
         validatePrice(product);
@@ -102,7 +131,7 @@ public class ProductService {
 
     public void delete(UUID id) {
         Product product = findActiveById(id);
-        product.setActive(false);
+        productRepository.deleteById(id);
         productRepository.save(product);
     }
 
