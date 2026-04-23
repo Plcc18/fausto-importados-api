@@ -11,6 +11,7 @@ import com.example.fausto_importados_api.services.exception.ResourceNotFoundExce
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -35,9 +36,7 @@ public class ProductService {
                     file.getBytes(),
                     Map.of()
             );
-
             return uploadResult.get("secure_url").toString();
-
         } catch (IOException e) {
             throw new RuntimeException("Erro ao fazer upload da imagem", e);
         }
@@ -49,32 +48,28 @@ public class ProductService {
 
     public Product findActiveById(UUID id) {
         return productRepository.findByIdAndActiveTrue(id)
-                .orElseThrow(() ->
-                        new ResourceNotFoundException("Product not found")
-                );
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found"));
     }
 
     public Page<Product> findFeatured(Pageable pageable) {
         return productRepository.findByFeaturedTrueAndActiveTrue(pageable);
     }
 
-    public Page<Product> findByCategory(
-            Category category,
-            Pageable pageable
-    ) {
+    public Page<Product> findByCategory(Category category, Pageable pageable) {
         return productRepository.findByCategoryAndActiveTrue(category, pageable);
     }
 
-    public Page<Product> findByOlfactiveFamily(
-            OlfactiveFamily olfactiveFamily,
-            Pageable pageable
-    ) {
+    public Page<Product> findByOlfactiveFamily(OlfactiveFamily olfactiveFamily, Pageable pageable) {
         return productRepository.findByOlfactiveFamilyAndActiveTrue(olfactiveFamily, pageable);
     }
 
     public Product save(Product product) {
         validateProduct(product);
         product.setActive(true);
+
+        // Garante consistência: se stockQuantity > 0, inStock = true
+        syncInStock(product);
+
         return productRepository.save(product);
     }
 
@@ -82,8 +77,42 @@ public class ProductService {
         validateName(product);
         validatePrice(product);
         validateCategory(product);
-        // sem validateId e sem validateDuplicate aqui
+
+        syncInStock(product);
+
         return productRepository.save(product);
+    }
+
+    // Decrementa o estoque em `quantity` unidades ao finalizar um pedido.
+    // Quando o estoque chega a 0, marca inStock = false automaticamente.
+    @Transactional
+    public Product decreaseStock(UUID id, int quantity) {
+        Product product = findActiveById(id);
+
+        int newQty = product.getStockQuantity() - quantity;
+
+        if (newQty < 0) {
+            throw new BusinessException("Estoque insuficiente para o produto: " + product.getName());
+        }
+
+        product.setStockQuantity(newQty);
+
+        if (newQty == 0) {
+            product.setInStock(false);
+        }
+
+        return productRepository.save(product);
+    }
+
+    // Mantém inStock sincronizado com stockQuantity
+    private void syncInStock(Product product) {
+        if (product.getStockQuantity() != null) {
+            if (product.getStockQuantity() > 0) {
+                product.setInStock(true);
+            } else {
+                product.setInStock(false);
+            }
+        }
     }
 
     private void validateProduct(Product product) {
@@ -92,7 +121,6 @@ public class ProductService {
         validateCategory(product);
         validateDuplicate(product);
         validateId(product);
-
     }
 
     private void validateName(Product product) {
@@ -105,7 +133,6 @@ public class ProductService {
         if (product.getPrice() == null) {
             throw new BusinessException("Price cannot be null");
         }
-
         if (product.getPrice().compareTo(BigDecimal.ZERO) <= 0) {
             throw new BusinessException("Price must be greater than zero");
         }
@@ -125,7 +152,7 @@ public class ProductService {
 
     private void validateId(Product product) {
         if (product.getId() != null) {
-            throw new BusinessException("Product id must not be informed on cration");
+            throw new BusinessException("Product id must not be informed on creation");
         }
     }
 
@@ -136,7 +163,6 @@ public class ProductService {
     }
 
     public Product updatePartial(UUID id, ProductUpdateDTO dto) {
-
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Produto não encontrado"));
 
@@ -152,6 +178,8 @@ public class ProductService {
         if (dto.getFeatured() != null) product.setFeatured(dto.getFeatured());
         if (dto.getInStock() != null) product.setInStock(dto.getInStock());
         if (dto.getActive() != null) product.setActive(dto.getActive());
+
+        syncInStock(product);
 
         return productRepository.save(product);
     }

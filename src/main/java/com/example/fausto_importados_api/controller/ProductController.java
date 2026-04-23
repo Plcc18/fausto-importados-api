@@ -19,6 +19,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -44,8 +45,12 @@ public class ProductController {
             String image,
             Boolean featured,
             Boolean inStock,
+            Integer stockQuantity,
             Boolean active
     ) {}
+
+    // DTO para decrementar estoque de múltiplos produtos de uma vez
+    public record StockDecreaseItem(UUID productId, int quantity) {}
 
     // DTO de resposta padrão
     public record ApiResponse(String timeStamp, String message) {}
@@ -90,7 +95,7 @@ public class ProductController {
     }
 
     // ======================
-    // POST - Criar produto com imagem
+    // POST - Criar produto
     // ======================
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
@@ -98,9 +103,24 @@ public class ProductController {
             @Valid @RequestBody Product p
     ) {
         productService.save(p);
-
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(new ApiResponse(Instant.now().toString(), "Product created successfully"));
+    }
+
+    // ======================
+    // POST - Decrementar estoque ao finalizar pedido (público — chamado pelo frontend)
+    // Recebe uma lista de itens { productId, quantity } e decrementa cada um.
+    // ======================
+    @PostMapping("/decrease-stock")
+    public ResponseEntity<ApiResponse> decreaseStock(
+            @RequestBody List<StockDecreaseItem> items
+    ) {
+        for (StockDecreaseItem item : items) {
+            productService.decreaseStock(item.productId(), item.quantity());
+        }
+        return ResponseEntity.ok(
+                new ApiResponse(Instant.now().toString(), "Stock updated successfully")
+        );
     }
 
     // ======================
@@ -115,7 +135,6 @@ public class ProductController {
     ) {
         try {
             Product existing = productService.findActiveById(id);
-
             Product p = objectMapper.readValue(productJson, Product.class);
 
             existing.setName(p.getName());
@@ -129,6 +148,7 @@ public class ProductController {
             existing.setFeatured(p.getFeatured());
             existing.setInStock(p.getInStock());
             existing.setActive(p.getActive());
+            existing.setStockQuantity(p.getStockQuantity());
 
             if (file != null && !file.isEmpty()) {
                 String imageUrl = productService.uploadImage(file);
@@ -140,7 +160,6 @@ public class ProductController {
             return ResponseEntity.ok(
                     new ApiResponse(Instant.now().toString(), "Product updated successfully")
             );
-
         } catch (Exception e) {
             throw new RuntimeException("Erro ao atualizar produto", e);
         }
@@ -150,7 +169,6 @@ public class ProductController {
     // PATCH - Atualização parcial
     // ======================
     @PatchMapping("/{id}")
-    //@PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Product> updatePartial(
             @PathVariable UUID id,
             @RequestBody ProductUpdateDTO dto
@@ -188,6 +206,7 @@ public class ProductController {
                 product.getImage(),
                 product.getFeatured(),
                 product.getInStock(),
+                product.getStockQuantity(),
                 product.getActive()
         );
     }

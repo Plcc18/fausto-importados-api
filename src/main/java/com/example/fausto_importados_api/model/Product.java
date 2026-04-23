@@ -3,6 +3,7 @@ package com.example.fausto_importados_api.model;
 import com.example.fausto_importados_api.model.enums.Category;
 import com.example.fausto_importados_api.model.enums.OlfactiveFamily;
 import jakarta.persistence.*;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
@@ -70,6 +71,13 @@ public class Product {
     @Column(name = "in_stock", nullable = false)
     private Boolean inStock;
 
+    // Quantidade disponível em estoque.
+    // Quando chegar a 0, inStock é automaticamente marcado como false no service.
+    @NotNull(message = "Stock quantity is mandatory")
+    @Min(value = 0, message = "Stock quantity cannot be negative")
+    @Column(name = "stock_quantity", nullable = false)
+    private Integer stockQuantity = 0;
+
     @NotNull
     @Column(nullable = false)
     private Boolean active = true;
@@ -82,4 +90,3 @@ public class Product {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 }
-
