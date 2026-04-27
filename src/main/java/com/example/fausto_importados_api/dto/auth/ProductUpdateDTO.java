@@ -23,7 +23,7 @@ public class ProductUpdateDTO {
     private Boolean featured;
     private Boolean inStock;
     private Boolean active;
+    private Integer stockQuantity;
 
     public ProductUpdateDTO() {}
-
 }

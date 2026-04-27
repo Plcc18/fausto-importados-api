@@ -55,8 +55,11 @@ public class SecurityConfig {
                         .requestMatchers("/auth/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/product/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/image/**").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/user").permitAll()
-                        .requestMatchers("/api/upload").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/user").hasRole("ADMIN")
+                        .requestMatchers("/api/upload").hasRole("ADMIN")
+                        // Criação de pedido é pública; gestão é ADMIN
+                        .requestMatchers(HttpMethod.POST, "/api/orders").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/product/decrease-stock").hasRole("ADMIN")
                         .anyRequest().hasRole("ADMIN")
                 )
                 .addFilterBefore(authenticationFilter, UsernamePasswordAuthenticationFilter.class);
@@ -71,11 +74,9 @@ public class SecurityConfig {
     ) throws Exception {
         AuthenticationManagerBuilder authBuilder =
                 http.getSharedObject(AuthenticationManagerBuilder.class);
-
         authBuilder
                 .userDetailsService(userDetailsService)
                 .passwordEncoder(passwordEncoder);
-
         return authBuilder.build();
     }
 
@@ -87,11 +88,10 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        // Origem exata obrigatória quando allowCredentials = true
         configuration.addAllowedOrigin("http://localhost:5173");
+        configuration.addAllowedOrigin("https://seu-site.vercel.app");
         configuration.addAllowedMethod("*");
         configuration.addAllowedHeader("*");
-        // Necessário para o browser enviar cookies nas requisições
         configuration.setAllowCredentials(true);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
