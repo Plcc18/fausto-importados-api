@@ -3,6 +3,7 @@ package com.example.fausto_importados_api.config;
 import com.example.fausto_importados_api.security.jwt.JwtAuthenticationEntryPoint;
 import com.example.fausto_importados_api.security.jwt.JwtAuthenticationFilter;
 import com.example.fausto_importados_api.security.jwt.JwtUserDetailsService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -60,6 +61,7 @@ public class SecurityConfig {
                         // Criação de pedido é pública; gestão é ADMIN
                         .requestMatchers(HttpMethod.POST, "/api/orders").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/product/decrease-stock").hasRole("ADMIN")
+                        .requestMatchers("/actuator/health").permitAll()
                         .anyRequest().hasRole("ADMIN")
                 )
                 .addFilterBefore(authenticationFilter, UsernamePasswordAuthenticationFilter.class);
@@ -85,14 +87,17 @@ public class SecurityConfig {
         return new BCryptPasswordEncoder();
     }
 
+    @Value("${FRONTEND_URL:http://localhost:5173}")
+    private String frontendUrl;
+
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.addAllowedOrigin("http://localhost:5173");
-        configuration.addAllowedOrigin("https://seu-site.vercel.app");
         configuration.addAllowedMethod("*");
         configuration.addAllowedHeader("*");
         configuration.setAllowCredentials(true);
+        configuration.addAllowedOrigin(frontendUrl);
+        configuration.addAllowedOrigin("http://localhost:5173");
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
         return source;

@@ -48,8 +48,8 @@ public class AuthController {
 
         ResponseCookie cookie = ResponseCookie.from("token", token)
                 .httpOnly(true)
-                .secure(false) // mudar para true em produção (HTTPS)
-                .sameSite("Lax")
+                .secure(true) // mudar para true em produção (HTTPS)
+                .sameSite("None")
                 .path("/")
                 .maxAge(Duration.ofDays(1))
                 .build();
@@ -73,8 +73,8 @@ public class AuthController {
     public ResponseEntity<Void> logout(HttpServletResponse response) {
         ResponseCookie expiredCookie = ResponseCookie.from("token", "")
                 .httpOnly(true)
-                .secure(false)
-                .sameSite("Lax")
+                .secure(true)
+                .sameSite("None")
                 .path("/")
                 .maxAge(0)
                 .build();
