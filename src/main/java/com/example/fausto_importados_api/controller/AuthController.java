@@ -4,6 +4,7 @@ import com.example.fausto_importados_api.dto.auth.JwtRequestDTO;
 import com.example.fausto_importados_api.security.jwt.JwtService;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
@@ -22,6 +23,12 @@ public class AuthController {
 
     private final AuthenticationManager authenticationManager;
     private final JwtService jwtService;
+
+    @Value("${app.cookie.secure:true}")
+    private boolean cookieSecure;
+
+    @Value("${app.cookie.same-site:None}")
+    private String cookieSameSite;
 
     public AuthController(
             AuthenticationManager authenticationManager,
@@ -48,8 +55,8 @@ public class AuthController {
 
         ResponseCookie cookie = ResponseCookie.from("token", token)
                 .httpOnly(true)
-                .secure(true) // mudar para true em produção (HTTPS)
-                .sameSite("None")
+                .secure(cookieSecure)
+                .sameSite(cookieSameSite)
                 .path("/")
                 .maxAge(Duration.ofDays(1))
                 .build();
@@ -73,8 +80,8 @@ public class AuthController {
     public ResponseEntity<Void> logout(HttpServletResponse response) {
         ResponseCookie expiredCookie = ResponseCookie.from("token", "")
                 .httpOnly(true)
-                .secure(true)
-                .sameSite("None")
+                .secure(cookieSecure)
+                .sameSite(cookieSameSite)
                 .path("/")
                 .maxAge(0)
                 .build();
