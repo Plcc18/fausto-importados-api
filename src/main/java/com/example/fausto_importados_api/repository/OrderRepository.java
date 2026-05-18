@@ -26,6 +26,16 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     // For notifications: all statuses, not filtered by hidden
     List<Order> findByStatusOrderByCreatedAtDesc(OrderStatus status);
 
+    // For the notification panel — exclude archived files
+    List<Order> findByHiddenFromNotificationsFalseOrderByCreatedAtDesc();
+
+    List<Order> findByStatusAndHiddenFromNotificationsFalseOrderByCreatedAtDesc(OrderStatus status);
+
+    @Modifying
+    @Transactional
+    @Query("UPDATE Order o SET o.hiddenFromNotifications = true WHERE o.status IN ('COMPLETED', 'CANCELLED')")
+    void hideCompletedAndCancelledFromNotifications();
+
     void deleteByStatusIn(List<OrderStatus> statuses);
 
     // Hide from panel (reset-sales)

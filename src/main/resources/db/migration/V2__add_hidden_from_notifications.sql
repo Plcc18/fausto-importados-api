@@ -1,0 +1,1 @@
+ALTER TABLE orders ADD COLUMN hidden_from_notifications BOOLEAN NOT NULL DEFAULT FALSE;

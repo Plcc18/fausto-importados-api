@@ -56,12 +56,12 @@ public class OrderService {
 
     // For notifications panel — shows all orders regardless of hidden flags
     public List<Order> findAll() {
-        return orderRepository.findAllByOrderByCreatedAtDesc();
+        return orderRepository.findByHiddenFromNotificationsFalseOrderByCreatedAtDesc();
     }
 
     // For notifications panel filter — shows by status regardless of hidden flags
     public List<Order> findByStatus(OrderStatus status) {
-        return orderRepository.findByStatusOrderByCreatedAtDesc(status);
+        return orderRepository.findByHiddenFromNotificationsFalseOrderByCreatedAtDesc();
     }
 
     // For sales stats cards in admin panel — excludes hiddenFromPanel
@@ -114,7 +114,7 @@ public class OrderService {
 
     @Transactional
     public void clearHistory() {
-        orderRepository.deleteByStatusIn(List.of(OrderStatus.COMPLETED, OrderStatus.CANCELLED));
+        orderRepository.hideCompletedAndCancelledFromNotifications();
     }
 
     // Sales stats for admin panel — only orders visible in panel
