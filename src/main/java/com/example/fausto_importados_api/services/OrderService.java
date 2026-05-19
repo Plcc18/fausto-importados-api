@@ -61,7 +61,7 @@ public class OrderService {
 
     // For notifications panel filter — shows by status regardless of hidden flags
     public List<Order> findByStatus(OrderStatus status) {
-        return orderRepository.findByHiddenFromNotificationsFalseOrderByCreatedAtDesc();
+        return orderRepository.findByStatusAndHiddenFromNotificationsFalseOrderByCreatedAtDesc(status);
     }
 
     // For sales stats cards in admin panel — excludes hiddenFromPanel
