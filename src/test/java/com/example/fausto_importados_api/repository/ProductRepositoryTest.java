@@ -27,7 +27,7 @@ class ProductRepositoryTest {
         p.setBrand("Dior");
         p.setDescription("Perfume masculino");
         p.setCategory(Category.MASCULINO);
-        p.setOlfactiveFamily(OlfactiveFamily.AMADEIRADO);
+        p.setOlfactiveFamily("AMADEIRADO");
         p.setSize("100ml");
         p.setPrice(new BigDecimal("599.90"));
         p.setOriginalPrice(new BigDecimal("699.90"));
