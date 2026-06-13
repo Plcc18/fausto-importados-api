@@ -14,7 +14,7 @@ public class ProductUpdateDTO {
     private String name;
     private String brand;
     private String description;
-    private OlfactiveFamily olfactiveFamily;
+    private String olfactiveFamily;
     private Category category;
     private String size;
     private BigDecimal price;

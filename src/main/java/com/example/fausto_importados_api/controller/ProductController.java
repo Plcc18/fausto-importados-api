@@ -37,7 +37,7 @@ public class ProductController {
             String name,
             String brand,
             String description,
-            OlfactiveFamily olfactiveFamily,
+            String olfactiveFamily,
             Category category,
             String size,
             BigDecimal price,
@@ -87,7 +87,7 @@ public class ProductController {
 
     @GetMapping("/olfactive-family/{olfactiveFamily}")
     public ResponseEntity<Page<Product>> getProductsByOlfactiveFamily(
-            @PathVariable OlfactiveFamily olfactiveFamily,
+            @PathVariable String olfactiveFamily,
             Pageable pageable
     ) {
         Page<Product> products = productService.findByOlfactiveFamily(olfactiveFamily, pageable);
@@ -153,6 +153,8 @@ public class ProductController {
             if (file != null && !file.isEmpty()) {
                 String imageUrl = productService.uploadImage(file);
                 existing.setImage(imageUrl);
+            } else {
+                existing.setImage(p.getImage());
             }
 
             productService.update(existing);

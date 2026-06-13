@@ -13,7 +13,7 @@ public record ProductResponseDTO(
         String name,
         String brand,
         String description,
-        OlfactiveFamily olfactiveFamily,
+        String olfactiveFamily,
         Category category,
         String size,
         BigDecimal price,

@@ -37,9 +37,8 @@ public class Product {
     private String description;
 
     @NotNull(message = "OlfactiveFamily is mandatory!")
-    @Enumerated(EnumType.STRING)
     @Column(name = "olfactive_family", nullable = false)
-    private OlfactiveFamily olfactiveFamily;
+    private String olfactiveFamily;
 
     @NotNull(message = "Category is mandatory!")
     @Enumerated(EnumType.STRING)

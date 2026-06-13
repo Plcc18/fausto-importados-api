@@ -59,7 +59,7 @@ public class ProductService {
         return productRepository.findByCategoryAndActiveTrue(category, pageable);
     }
 
-    public Page<Product> findByOlfactiveFamily(OlfactiveFamily olfactiveFamily, Pageable pageable) {
+    public Page<Product> findByOlfactiveFamily(String olfactiveFamily, Pageable pageable) {
         return productRepository.findByOlfactiveFamilyAndActiveTrue(olfactiveFamily, pageable);
     }
 

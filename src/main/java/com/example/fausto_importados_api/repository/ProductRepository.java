@@ -30,9 +30,14 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
             Pageable pageable
     );
 
-    // Filtro por família olfativa
+    // Filtro por família olfativa (com suporte a múltiplas famílias)
+    @Query("""
+        SELECT p FROM Product p
+        WHERE p.active = true
+          AND LOWER(p.olfactiveFamily) LIKE LOWER(CONCAT('%', :olfactiveFamily, '%'))
+    """)
     Page<Product> findByOlfactiveFamilyAndActiveTrue(
-            OlfactiveFamily olfactiveFamily,
+            @Param("olfactiveFamily") String olfactiveFamily,
             Pageable pageable
     );
 
