@@ -7,5 +7,9 @@ public enum OlfactiveFamily {
     ORIENTAL,
     AQUATICO,
     FRUTADO,
-    GOURMAND
+    GOURMAND,
+    AROMATICO,
+    FOUGERE,
+    CHIPRE,
+    COURO
 }
