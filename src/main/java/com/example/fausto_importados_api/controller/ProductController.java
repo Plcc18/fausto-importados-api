@@ -10,6 +10,7 @@ import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -59,7 +60,7 @@ public class ProductController {
     // GETs públicos
     // ======================
     @GetMapping
-    public ResponseEntity<Page<Product>> getAllActiveProducts(Pageable pageable) {
+    public ResponseEntity<Page<Product>> getAllActiveProducts(@PageableDefault(size = 2000) Pageable pageable) {
         Page<Product> products = productService.findAllActive(pageable);
         return ResponseEntity.ok(products);
     }
@@ -71,7 +72,7 @@ public class ProductController {
     }
 
     @GetMapping("/featured")
-    public ResponseEntity<Page<Product>> getFeaturedProducts(Pageable pageable) {
+    public ResponseEntity<Page<Product>> getFeaturedProducts(@PageableDefault(size = 2000) Pageable pageable) {
         Page<Product> products = productService.findFeatured(pageable);
         return ResponseEntity.ok(products);
     }
@@ -79,7 +80,7 @@ public class ProductController {
     @GetMapping("/category/{category}")
     public ResponseEntity<Page<Product>> getProductsByCategory(
             @PathVariable Category category,
-            Pageable pageable
+            @PageableDefault(size = 2000) Pageable pageable
     ) {
         Page<Product> products = productService.findByCategory(category, pageable);
         return ResponseEntity.ok(products);
@@ -88,7 +89,7 @@ public class ProductController {
     @GetMapping("/olfactive-family/{olfactiveFamily}")
     public ResponseEntity<Page<Product>> getProductsByOlfactiveFamily(
             @PathVariable String olfactiveFamily,
-            Pageable pageable
+            @PageableDefault(size = 2000) Pageable pageable
     ) {
         Page<Product> products = productService.findByOlfactiveFamily(olfactiveFamily, pageable);
         return ResponseEntity.ok(products);
