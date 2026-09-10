@@ -1,7 +1,7 @@
 package com.example.fausto_importados_api.dto.auth;
 
 import com.example.fausto_importados_api.model.enums.Category;
-import com.example.fausto_importados_api.model.enums.OlfactiveFamily;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
@@ -18,8 +18,9 @@ public record ProductRequestDTO(
         @NotBlank(message = "Description is mandatory!")
         String description,
 
+        // Aceita múltiplas famílias olfativas separadas por vírgula
         @NotNull(message = "OlfactiveFamily is mandatory!")
-        OlfactiveFamily olfactiveFamily,
+        String olfactiveFamily,
 
         @NotNull(message = "Category is mandatory!")
         Category category,
@@ -40,5 +41,9 @@ public record ProductRequestDTO(
         Boolean featured,
 
         @NotNull(message = "In stock is mandatory!")
-        Boolean inStock
+        Boolean inStock,
+
+        @NotNull(message = "Stock quantity is mandatory")
+        @Min(value = 0, message = "Stock quantity cannot be negative")
+        Integer stockQuantity
 ) {}

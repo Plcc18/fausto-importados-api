@@ -2,7 +2,9 @@ package com.example.fausto_importados_api.model;
 
 import com.example.fausto_importados_api.model.enums.OrderStatus;
 import jakarta.persistence.*;
-import lombok.Data;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.math.BigDecimal;
@@ -13,7 +15,9 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "orders")
-@Data
+@Getter
+@Setter
+@NoArgsConstructor
 public class Order {
 
     @Id
@@ -53,4 +57,16 @@ public class Order {
 
     @Column(nullable = false)
     private Boolean hiddenFromNotifications = false;
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof Order order)) return false;
+        return id != null && id.equals(order.id);
+    }
+
+    @Override
+    public int hashCode() {
+        return getClass().hashCode();
+    }
 }

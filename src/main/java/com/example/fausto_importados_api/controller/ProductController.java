@@ -1,9 +1,11 @@
 package com.example.fausto_importados_api.controller;
 
+import com.example.fausto_importados_api.dto.auth.ProductRequestDTO;
+import com.example.fausto_importados_api.dto.auth.ProductResponseDTO;
 import com.example.fausto_importados_api.dto.auth.ProductUpdateDTO;
+import com.example.fausto_importados_api.mapper.ProductMapper;
 import com.example.fausto_importados_api.model.Product;
 import com.example.fausto_importados_api.model.enums.Category;
-import com.example.fausto_importados_api.model.enums.OlfactiveFamily;
 import com.example.fausto_importados_api.services.ProductService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.Valid;
@@ -18,7 +20,6 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -30,25 +31,10 @@ public class ProductController {
     @Autowired
     private ProductService productService;
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    @Autowired
+    private ProductMapper productMapper;
 
-    // DTO de resposta do produto
-    public record ProductDTO(
-            UUID id,
-            String name,
-            String brand,
-            String description,
-            String olfactiveFamily,
-            Category category,
-            String size,
-            BigDecimal price,
-            BigDecimal originalPrice,
-            String image,
-            Boolean featured,
-            Boolean inStock,
-            Integer stockQuantity,
-            Boolean active
-    ) {}
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     // DTO para decrementar estoque de múltiplos produtos de uma vez
     public record StockDecreaseItem(UUID productId, int quantity) {}
@@ -60,38 +46,38 @@ public class ProductController {
     // GETs públicos
     // ======================
     @GetMapping
-    public ResponseEntity<Page<Product>> getAllActiveProducts(@PageableDefault(size = 2000) Pageable pageable) {
-        Page<Product> products = productService.findAllActive(pageable);
+    public ResponseEntity<Page<ProductResponseDTO>> getAllActiveProducts(@PageableDefault(size = 2000) Pageable pageable) {
+        Page<ProductResponseDTO> products = productService.findAllActive(pageable).map(productMapper::toResponseDTO);
         return ResponseEntity.ok(products);
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<ProductDTO> getProduct(@PathVariable UUID id) {
+    public ResponseEntity<ProductResponseDTO> getProduct(@PathVariable UUID id) {
         Product p = productService.findActiveById(id);
-        return ResponseEntity.ok(mapToDTO(p));
+        return ResponseEntity.ok(productMapper.toResponseDTO(p));
     }
 
     @GetMapping("/featured")
-    public ResponseEntity<Page<Product>> getFeaturedProducts(@PageableDefault(size = 2000) Pageable pageable) {
-        Page<Product> products = productService.findFeatured(pageable);
+    public ResponseEntity<Page<ProductResponseDTO>> getFeaturedProducts(@PageableDefault(size = 2000) Pageable pageable) {
+        Page<ProductResponseDTO> products = productService.findFeatured(pageable).map(productMapper::toResponseDTO);
         return ResponseEntity.ok(products);
     }
 
     @GetMapping("/category/{category}")
-    public ResponseEntity<Page<Product>> getProductsByCategory(
+    public ResponseEntity<Page<ProductResponseDTO>> getProductsByCategory(
             @PathVariable Category category,
             @PageableDefault(size = 2000) Pageable pageable
     ) {
-        Page<Product> products = productService.findByCategory(category, pageable);
+        Page<ProductResponseDTO> products = productService.findByCategory(category, pageable).map(productMapper::toResponseDTO);
         return ResponseEntity.ok(products);
     }
 
     @GetMapping("/olfactive-family/{olfactiveFamily}")
-    public ResponseEntity<Page<Product>> getProductsByOlfactiveFamily(
+    public ResponseEntity<Page<ProductResponseDTO>> getProductsByOlfactiveFamily(
             @PathVariable String olfactiveFamily,
             @PageableDefault(size = 2000) Pageable pageable
     ) {
-        Page<Product> products = productService.findByOlfactiveFamily(olfactiveFamily, pageable);
+        Page<ProductResponseDTO> products = productService.findByOlfactiveFamily(olfactiveFamily, pageable).map(productMapper::toResponseDTO);
         return ResponseEntity.ok(products);
     }
 
@@ -101,9 +87,9 @@ public class ProductController {
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse> postProduct(
-            @Valid @RequestBody Product p
+            @Valid @RequestBody ProductRequestDTO dto
     ) {
-        productService.save(p);
+        productService.save(productMapper.toEntity(dto));
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(new ApiResponse(Instant.now().toString(), "Product created successfully"));
     }
@@ -136,26 +122,13 @@ public class ProductController {
     ) {
         try {
             Product existing = productService.findActiveById(id);
-            Product p = objectMapper.readValue(productJson, Product.class);
+            ProductRequestDTO dto = objectMapper.readValue(productJson, ProductRequestDTO.class);
 
-            existing.setName(p.getName());
-            existing.setBrand(p.getBrand());
-            existing.setDescription(p.getDescription());
-            existing.setOlfactiveFamily(p.getOlfactiveFamily());
-            existing.setCategory(p.getCategory());
-            existing.setSize(p.getSize());
-            existing.setPrice(p.getPrice());
-            existing.setOriginalPrice(p.getOriginalPrice());
-            existing.setFeatured(p.getFeatured());
-            existing.setInStock(p.getInStock());
-            existing.setActive(p.getActive());
-            existing.setStockQuantity(p.getStockQuantity());
+            productMapper.updateEntityFromRequest(existing, dto);
 
             if (file != null && !file.isEmpty()) {
                 String imageUrl = productService.uploadImage(file);
                 existing.setImage(imageUrl);
-            } else {
-                existing.setImage(p.getImage());
             }
 
             productService.update(existing);
@@ -172,12 +145,12 @@ public class ProductController {
     // PATCH - Atualização parcial
     // ======================
     @PatchMapping("/{id}")
-    public ResponseEntity<Product> updatePartial(
+    public ResponseEntity<ProductResponseDTO> updatePartial(
             @PathVariable UUID id,
             @RequestBody ProductUpdateDTO dto
     ) {
         Product updated = productService.updatePartial(id, dto);
-        return ResponseEntity.ok(updated);
+        return ResponseEntity.ok(productMapper.toResponseDTO(updated));
     }
 
     // ======================
@@ -189,28 +162,6 @@ public class ProductController {
         productService.delete(id);
         return ResponseEntity.ok(
                 new ApiResponse(Instant.now().toString(), "Product deleted successfully")
-        );
-    }
-
-    // ======================
-    // Mapper
-    // ======================
-    private ProductDTO mapToDTO(Product product) {
-        return new ProductDTO(
-                product.getId(),
-                product.getName(),
-                product.getBrand(),
-                product.getDescription(),
-                product.getOlfactiveFamily(),
-                product.getCategory(),
-                product.getSize(),
-                product.getPrice(),
-                product.getOriginalPrice(),
-                product.getImage(),
-                product.getFeatured(),
-                product.getInStock(),
-                product.getStockQuantity(),
-                product.getActive()
         );
     }
 }

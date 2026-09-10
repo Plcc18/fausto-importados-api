@@ -10,6 +10,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -17,6 +19,9 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
 
     // Buscar produto ativo por ID
     Optional<Product> findByIdAndActiveTrue(UUID id);
+
+    // Buscar vários produtos ativos de uma vez (evita N+1 ao validar itens de um pedido)
+    List<Product> findAllByIdInAndActiveTrue(Collection<UUID> ids);
 
     // Listar produtos ativos
     Page<Product> findAllByActiveTrue(Pageable pageable);

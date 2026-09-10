@@ -2,6 +2,7 @@ package com.example.fausto_importados_api.services;
 
 import com.cloudinary.Cloudinary;
 import com.example.fausto_importados_api.dto.auth.ProductUpdateDTO;
+import com.example.fausto_importados_api.mapper.ProductMapper;
 import com.example.fausto_importados_api.model.Product;
 import com.example.fausto_importados_api.model.enums.Category;
 import com.example.fausto_importados_api.model.enums.OlfactiveFamily;
@@ -16,6 +17,8 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -24,10 +27,12 @@ public class ProductService {
 
     private final ProductRepository productRepository;
     private final Cloudinary cloudinary;
+    private final ProductMapper productMapper;
 
-    public ProductService(ProductRepository productRepository, Cloudinary cloudinary) {
+    public ProductService(ProductRepository productRepository, Cloudinary cloudinary, ProductMapper productMapper) {
         this.productRepository = productRepository;
         this.cloudinary = cloudinary;
+        this.productMapper = productMapper;
     }
 
     public String uploadImage(MultipartFile file) {
@@ -104,6 +109,31 @@ public class ProductService {
         return productRepository.save(product);
     }
 
+    // Busca vários produtos ativos numa única query (evita N+1 ao validar itens de um pedido)
+    public List<Product> findAllActiveByIds(Collection<UUID> ids) {
+        return productRepository.findAllByIdInAndActiveTrue(ids);
+    }
+
+    // Decrementa o estoque de vários produtos de uma vez, numa única leitura e numa única escrita
+    @Transactional
+    public List<Product> decreaseStockBatch(Map<UUID, Integer> quantitiesByProductId) {
+        List<Product> products = findAllActiveByIds(quantitiesByProductId.keySet());
+
+        for (Product product : products) {
+            int quantity = quantitiesByProductId.get(product.getId());
+            int newQty = product.getStockQuantity() - quantity;
+
+            if (newQty < 0) {
+                throw new BusinessException("Estoque insuficiente para o produto: " + product.getName());
+            }
+
+            product.setStockQuantity(newQty);
+            product.setInStock(newQty > 0);
+        }
+
+        return productRepository.saveAll(products);
+    }
+
     // Mantém inStock sincronizado com stockQuantity
     private void syncInStock(Product product) {
         if (product.getStockQuantity() != null) {
@@ -164,21 +194,9 @@ public class ProductService {
 
     public Product updatePartial(UUID id, ProductUpdateDTO dto) {
         Product product = productRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Produto não encontrado"));
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found"));
 
-        if (dto.getName() != null) product.setName(dto.getName());
-        if (dto.getBrand() != null) product.setBrand(dto.getBrand());
-        if (dto.getDescription() != null) product.setDescription(dto.getDescription());
-        if (dto.getOlfactiveFamily() != null) product.setOlfactiveFamily(dto.getOlfactiveFamily());
-        if (dto.getCategory() != null) product.setCategory(dto.getCategory());
-        if (dto.getSize() != null) product.setSize(dto.getSize());
-        if (dto.getPrice() != null) product.setPrice(dto.getPrice());
-        if (dto.getOriginalPrice() != null) product.setOriginalPrice(dto.getOriginalPrice());
-        if (dto.getImage() != null) product.setImage(dto.getImage());
-        if (dto.getFeatured() != null) product.setFeatured(dto.getFeatured());
-        if (dto.getInStock() != null) product.setInStock(dto.getInStock());
-        if (dto.getActive() != null) product.setActive(dto.getActive());
-
+        productMapper.applyPatch(product, dto);
         syncInStock(product);
 
         return productRepository.save(product);

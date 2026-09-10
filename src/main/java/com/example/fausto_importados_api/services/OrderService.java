@@ -1,9 +1,9 @@
 package com.example.fausto_importados_api.services;
 
-import com.example.fausto_importados_api.dto.CreateOrderDTO;
 import com.example.fausto_importados_api.dto.SalesStatsDTO;
 import com.example.fausto_importados_api.model.Order;
 import com.example.fausto_importados_api.model.OrderItem;
+import com.example.fausto_importados_api.model.Product;
 import com.example.fausto_importados_api.model.enums.OrderStatus;
 import com.example.fausto_importados_api.repository.OrderRepository;
 import com.example.fausto_importados_api.services.exception.BusinessException;
@@ -15,7 +15,10 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class OrderService {
@@ -29,28 +32,7 @@ public class OrderService {
     }
 
     @Transactional
-    public Order createOrder(CreateOrderDTO dto) {
-        Order order = new Order();
-        order.setCustomerName(dto.customerName());
-        order.setCustomerWhatsapp(dto.customerWhatsapp());
-        order.setPaymentMethod(dto.paymentMethod());
-        order.setTotal(dto.total());
-        order.setStatus(OrderStatus.PENDING);
-
-        for (CreateOrderDTO.ItemDTO itemDTO : dto.items()) {
-            OrderItem item = new OrderItem();
-            item.setOrder(order);
-            item.setProductId(itemDTO.productId());
-            item.setProductName(itemDTO.productName());
-            item.setProductSize(itemDTO.productSize());
-            item.setProductCategory(itemDTO.productCategory());
-            item.setProductFamily(itemDTO.productFamily());
-            item.setOnSale(itemDTO.onSale() != null ? itemDTO.onSale() : false);
-            item.setQuantity(itemDTO.quantity());
-            item.setUnitPrice(itemDTO.unitPrice());
-            order.getItems().add(item);
-        }
-
+    public Order createOrder(Order order) {
         return orderRepository.save(order);
     }
 
@@ -82,19 +64,27 @@ public class OrderService {
         if (order.getStatus() != OrderStatus.PENDING)
             throw new IllegalStateException("Only PENDING orders can be completed");
 
-        // Check stock for all items before decrementing
+        // Soma as quantidades por produto (caso o mesmo produto apareça em mais de um item)
+        Map<UUID, Integer> quantitiesByProductId = order.getItems().stream()
+                .collect(Collectors.toMap(OrderItem::getProductId, OrderItem::getQuantity, Integer::sum));
+
+        // Busca todos os produtos numa única query, em vez de uma consulta por item (N+1)
+        Map<UUID, Product> productsById = productService.findAllActiveByIds(quantitiesByProductId.keySet()).stream()
+                .collect(Collectors.toMap(Product::getId, Function.identity()));
+
         for (OrderItem item : order.getItems()) {
-            var product = productService.findActiveById(item.getProductId());
-            if ((product.getStockQuantity() == null ? 0 : product.getStockQuantity()) < item.getQuantity()) {
+            Product product = productsById.get(item.getProductId());
+            int available = product == null || product.getStockQuantity() == null ? 0 : product.getStockQuantity();
+
+            if (available < item.getQuantity()) {
                 throw new BusinessException(
                         "Estoque insuficiente para \"" + item.getProductName() + "\" (" + item.getProductSize() + "ml). " +
-                                "Disponível: " + (product.getStockQuantity() == null ? 0 : product.getStockQuantity()) + " | Pedido: " + item.getQuantity()
+                                "Disponível: " + available + " | Pedido: " + item.getQuantity()
                 );
             }
         }
 
-        for (OrderItem item : order.getItems())
-            productService.decreaseStock(item.getProductId(), item.getQuantity());
+        productService.decreaseStockBatch(quantitiesByProductId);
 
         order.setStatus(OrderStatus.COMPLETED);
         return orderRepository.save(order);
