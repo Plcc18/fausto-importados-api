@@ -148,21 +148,25 @@ cd fausto-importados-api
 createdb fausto_importados_db
 ```
 
-3. **Configure o `application.properties`**
+3. **Configure as variáveis de ambiente**
 
-```properties
-spring.datasource.url=jdbc:postgresql://localhost:5432/fausto_importados_db
-spring.datasource.username=seu_usuario
-spring.datasource.password=sua_senha
+A configuração fica em `src/main/resources/application.yml` (YAML), que só lê variáveis
+de ambiente — nenhum segredo é commitado. Copie `application.yml.example` como referência
+e exporte no seu ambiente/IDE:
 
-spring.flyway.enabled=true
-spring.flyway.baseline-on-migrate=true
+```bash
+export DB_URL=jdbc:postgresql://localhost:5432/fausto_importados_db
+export DB_USERNAME=seu_usuario
+export DB_PASSWORD=sua_senha
 
-spring.jwt.secret=sua_chave_secreta
+export JWT_SECRET=$(openssl rand -base64 32)
 
-cloudinary.cloud-name=seu_cloud_name
-cloudinary.api-key=sua_api_key
-cloudinary.api-secret=sua_api_secret
+export CLOUDINARY_NAME=seu_cloud_name
+export CLOUDINARY_KEY=sua_api_key
+export CLOUDINARY_SECRET=sua_api_secret
+
+export ADMIN_EMAIL=admin@fausto.com
+export ADMIN_PASSWORD=sua_senha_de_admin
 ```
 
 4. **Execute a aplicação**
@@ -221,7 +225,7 @@ src/
 │   │   └── FaustoImportadosApplication.java
 │   └── resources/
 │       ├── db/migration/   → Scripts Flyway
-│       └── application.properties
+│       └── application.yml
 ```
 
 ---

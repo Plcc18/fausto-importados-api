@@ -1,0 +1,75 @@
+# Copie este arquivo para application.yml (ou defina as variáveis de ambiente
+# abaixo diretamente no seu ambiente/IDE) para rodar o projeto localmente.
+# Nenhum valor real de segredo deve ser commitado — em application.yml e nos
+# demais application-*.yml a aplicação só lê nomes de variáveis de ambiente
+# (${VAR}), nunca segredos literais.
+#
+# Variáveis de ambiente necessárias:
+#   DB_URL              - ex: jdbc:postgresql://localhost:5432/fausto_importados_db
+#   DB_USERNAME
+#   DB_PASSWORD
+#   JWT_SECRET           - chave em Base64 com pelo menos 256 bits (ex: openssl rand -base64 32)
+#   JWT_EXPIRATION        - opcional, em ms (default: 86400000 = 24h)
+#   CLOUDINARY_NAME
+#   CLOUDINARY_KEY
+#   CLOUDINARY_SECRET
+#   ADMIN_EMAIL           - email do admin criado automaticamente na primeira execução
+#   ADMIN_PASSWORD        - senha do admin criado automaticamente na primeira execução
+#   PORT                  - opcional (default: 8080)
+#
+# Perfis disponíveis (spring.profiles.active=dev|prod):
+#   dev  - logs verbosos de segurança, cookies com secure=false/same-site=Lax (HTTP local)
+#   prod - logs reduzidos, cookies com secure=true/same-site=None (HTTPS)
+
+spring:
+  application:
+    name: fausto-importados-api
+
+  datasource:
+    url: "${DB_URL}"
+    username: "${DB_USERNAME}"
+    password: "${DB_PASSWORD}"
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+server:
+  port: "${PORT:8080}"
+
+logging:
+  level:
+    org.springframework.security: DEBUG
+
+security:
+  jwt:
+    secret: "${JWT_SECRET}"
+    expiration: "${JWT_EXPIRATION:86400000}"
+
+cloudinary:
+  cloud_name: "${CLOUDINARY_NAME}"
+  api_key: "${CLOUDINARY_KEY}"
+  api_secret: "${CLOUDINARY_SECRET}"
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+ADMIN_EMAIL: "${ADMIN_EMAIL}"
+ADMIN_PASSWORD: "${ADMIN_PASSWORD}"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
