@@ -143,6 +143,7 @@ public class ProductController {
     // PATCH - Atualização parcial
     // ======================
     @PatchMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ProductResponseDTO> updatePartial(
             @PathVariable UUID id,
             @RequestBody ProductUpdateDTO dto
