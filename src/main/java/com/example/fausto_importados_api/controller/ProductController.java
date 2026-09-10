@@ -7,8 +7,11 @@ import com.example.fausto_importados_api.mapper.ProductMapper;
 import com.example.fausto_importados_api.model.Product;
 import com.example.fausto_importados_api.model.enums.Category;
 import com.example.fausto_importados_api.services.ProductService;
+import com.example.fausto_importados_api.services.exception.InvalidProductException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Valid;
+import jakarta.validation.Validator;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -22,7 +25,9 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/product")
@@ -33,6 +38,9 @@ public class ProductController {
 
     @Autowired
     private ProductMapper productMapper;
+
+    @Autowired
+    private Validator validator;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -122,6 +130,15 @@ public class ProductController {
             Product existing = productService.findActiveById(id);
             ProductRequestDTO dto = objectMapper.readValue(productJson, ProductRequestDTO.class);
 
+            // @RequestPart não passa pelo @Valid do Spring — valida manualmente
+            Set<ConstraintViolation<ProductRequestDTO>> violations = validator.validate(dto);
+            if (!violations.isEmpty()) {
+                String message = violations.stream()
+                        .map(ConstraintViolation::getMessage)
+                        .collect(Collectors.joining("; "));
+                throw new InvalidProductException(message);
+            }
+
             productMapper.updateEntityFromRequest(existing, dto);
 
             if (file != null && !file.isEmpty()) {
@@ -134,6 +151,8 @@ public class ProductController {
             return ResponseEntity.ok(
                     new ApiResponse(Instant.now().toString(), "Product updated successfully")
             );
+        } catch (InvalidProductException e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException("Erro ao atualizar produto", e);
         }
@@ -146,7 +165,7 @@ public class ProductController {
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ProductResponseDTO> updatePartial(
             @PathVariable UUID id,
-            @RequestBody ProductUpdateDTO dto
+            @Valid @RequestBody ProductUpdateDTO dto
     ) {
         Product updated = productService.updatePartial(id, dto);
         return ResponseEntity.ok(productMapper.toResponseDTO(updated));

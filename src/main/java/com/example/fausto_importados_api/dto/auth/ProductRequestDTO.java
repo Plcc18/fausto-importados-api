@@ -1,5 +1,6 @@
 package com.example.fausto_importados_api.dto.auth;
 
+import com.example.fausto_importados_api.dto.validation.ValidOlfactiveFamily;
 import com.example.fausto_importados_api.model.enums.Category;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -20,6 +21,7 @@ public record ProductRequestDTO(
 
         // Aceita múltiplas famílias olfativas separadas por vírgula
         @NotNull(message = "OlfactiveFamily is mandatory!")
+        @ValidOlfactiveFamily
         String olfactiveFamily,
 
         @NotNull(message = "Category is mandatory!")
