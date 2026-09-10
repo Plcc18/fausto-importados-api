@@ -7,8 +7,10 @@ import com.example.fausto_importados_api.model.Product;
 import com.example.fausto_importados_api.model.enums.Category;
 import com.example.fausto_importados_api.model.enums.OlfactiveFamily;
 import com.example.fausto_importados_api.repository.ProductRepository;
-import com.example.fausto_importados_api.services.exception.BusinessException;
-import com.example.fausto_importados_api.services.exception.ResourceNotFoundException;
+import com.example.fausto_importados_api.services.exception.DuplicateProductException;
+import com.example.fausto_importados_api.services.exception.InsufficientStockException;
+import com.example.fausto_importados_api.services.exception.InvalidProductException;
+import com.example.fausto_importados_api.services.exception.ProductNotFoundException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -53,7 +55,7 @@ public class ProductService {
 
     public Product findActiveById(UUID id) {
         return productRepository.findByIdAndActiveTrue(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Product not found"));
+                .orElseThrow(() -> new ProductNotFoundException("Product not found"));
     }
 
     public Page<Product> findFeatured(Pageable pageable) {
@@ -97,7 +99,7 @@ public class ProductService {
         int newQty = product.getStockQuantity() - quantity;
 
         if (newQty < 0) {
-            throw new BusinessException("Estoque insuficiente para o produto: " + product.getName());
+            throw new InsufficientStockException("Estoque insuficiente para o produto: " + product.getName());
         }
 
         product.setStockQuantity(newQty);
@@ -124,7 +126,7 @@ public class ProductService {
             int newQty = product.getStockQuantity() - quantity;
 
             if (newQty < 0) {
-                throw new BusinessException("Estoque insuficiente para o produto: " + product.getName());
+                throw new InsufficientStockException("Estoque insuficiente para o produto: " + product.getName());
             }
 
             product.setStockQuantity(newQty);
@@ -155,34 +157,34 @@ public class ProductService {
 
     private void validateName(Product product) {
         if (product.getName() == null) {
-            throw new BusinessException("Product name is required");
+            throw new InvalidProductException("Product name is required");
         }
     }
 
     private void validatePrice(Product product) {
         if (product.getPrice() == null) {
-            throw new BusinessException("Price cannot be null");
+            throw new InvalidProductException("Price cannot be null");
         }
         if (product.getPrice().compareTo(BigDecimal.ZERO) <= 0) {
-            throw new BusinessException("Price must be greater than zero");
+            throw new InvalidProductException("Price must be greater than zero");
         }
     }
 
     private void validateCategory(Product product) {
         if (product.getCategory() == null) {
-            throw new BusinessException("Product category is required");
+            throw new InvalidProductException("Product category is required");
         }
     }
 
     private void validateDuplicate(Product product) {
         if (productRepository.existsByName(product.getName())) {
-            throw new BusinessException("Product already exists");
+            throw new DuplicateProductException("Product already exists");
         }
     }
 
     private void validateId(Product product) {
         if (product.getId() != null) {
-            throw new BusinessException("Product id must not be informed on creation");
+            throw new InvalidProductException("Product id must not be informed on creation");
         }
     }
 
@@ -194,7 +196,7 @@ public class ProductService {
 
     public Product updatePartial(UUID id, ProductUpdateDTO dto) {
         Product product = productRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Product not found"));
+                .orElseThrow(() -> new ProductNotFoundException("Product not found"));
 
         productMapper.applyPatch(product, dto);
         syncInStock(product);

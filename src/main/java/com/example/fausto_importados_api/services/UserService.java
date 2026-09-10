@@ -3,8 +3,8 @@ package com.example.fausto_importados_api.services;
 import com.example.fausto_importados_api.model.User;
 import com.example.fausto_importados_api.model.enums.Role;
 import com.example.fausto_importados_api.repository.UserRepository;
-import com.example.fausto_importados_api.services.exception.BusinessException;
-import com.example.fausto_importados_api.services.exception.ResourceNotFoundException;
+import com.example.fausto_importados_api.services.exception.DuplicateUserException;
+import com.example.fausto_importados_api.services.exception.UserNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -34,15 +34,19 @@ public class UserService {
     public User findByEmail(String email) {
         return userRepository.findByEmail(email)
                 .orElseThrow(() ->
-                        new ResourceNotFoundException("Admin Not Found")
+                        new UserNotFoundException("Admin Not Found")
                 );
     }
 
-    // criação do admin
+    // criação do admin — só pode existir um admin no sistema
     public User createAdmin(User user) {
 
+        if (userRepository.existsByRole(Role.ADMIN)) {
+            throw new DuplicateUserException("Admin already exists");
+        }
+
         if (userRepository.existsByEmail(user.getEmail())) {
-            throw new BusinessException("Email already registered");
+            throw new DuplicateUserException("Email already registered");
         }
 
         User admin = buildAdmin(user);
@@ -62,7 +66,7 @@ public class UserService {
 
     public User findById(UUID id) {
         return userRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Admin not found"));
+                .orElseThrow(() -> new UserNotFoundException("Admin not found"));
     }
 
     public void deleteById(UUID id) {

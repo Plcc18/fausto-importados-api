@@ -4,8 +4,9 @@ import com.example.fausto_importados_api.model.Product;
 import com.example.fausto_importados_api.model.enums.Category;
 import com.example.fausto_importados_api.repository.ProductRepository;
 import com.example.fausto_importados_api.services.ProductService;
-import com.example.fausto_importados_api.services.exception.BusinessException;
-import com.example.fausto_importados_api.services.exception.ResourceNotFoundException;
+import com.example.fausto_importados_api.services.exception.DuplicateProductException;
+import com.example.fausto_importados_api.services.exception.InvalidProductException;
+import com.example.fausto_importados_api.services.exception.ProductNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -86,7 +87,7 @@ class ProductServiceTest {
                 .thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> productService.findActiveById(id))
-                .isInstanceOf(ResourceNotFoundException.class)
+                .isInstanceOf(ProductNotFoundException.class)
                 .hasMessage("Product not found");
     }
 
@@ -110,7 +111,7 @@ class ProductServiceTest {
         product.setName(null);
 
         assertThatThrownBy(() -> productService.save(product))
-                .isInstanceOf(BusinessException.class)
+                .isInstanceOf(InvalidProductException.class)
                 .hasMessage("Product name is required");
 
         verify(productRepository, never()).save(any());
@@ -121,7 +122,7 @@ class ProductServiceTest {
         product.setPrice(null);
 
         assertThatThrownBy(() -> productService.save(product))
-                .isInstanceOf(BusinessException.class)
+                .isInstanceOf(InvalidProductException.class)
                 .hasMessage("Price cannot be null");
     }
 
@@ -130,7 +131,7 @@ class ProductServiceTest {
         product.setPrice(BigDecimal.ZERO);
 
         assertThatThrownBy(() -> productService.save(product))
-                .isInstanceOf(BusinessException.class)
+                .isInstanceOf(InvalidProductException.class)
                 .hasMessage("Price must be greater than zero");
     }
 
@@ -139,7 +140,7 @@ class ProductServiceTest {
         product.setCategory(null);
 
         assertThatThrownBy(() -> productService.save(product))
-                .isInstanceOf(BusinessException.class)
+                .isInstanceOf(InvalidProductException.class)
                 .hasMessage("Product category is required");
     }
 
@@ -149,8 +150,8 @@ class ProductServiceTest {
                 .thenReturn(true);
 
         assertThatThrownBy(() -> productService.save(product))
-                .isInstanceOf(BusinessException.class)
-                .hasMessage("Product alredy exists");
+                .isInstanceOf(DuplicateProductException.class)
+                .hasMessage("Product already exists");
     }
 
     @Test
@@ -158,7 +159,7 @@ class ProductServiceTest {
         product.setId(UUID.randomUUID());
 
         assertThatThrownBy(() -> productService.save(product))
-                .isInstanceOf(BusinessException.class)
-                .hasMessage("Product id must not be informed on cration");
+                .isInstanceOf(InvalidProductException.class)
+                .hasMessage("Product id must not be informed on creation");
     }
 }

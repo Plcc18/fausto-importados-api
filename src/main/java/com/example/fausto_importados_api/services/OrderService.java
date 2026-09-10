@@ -6,8 +6,9 @@ import com.example.fausto_importados_api.model.OrderItem;
 import com.example.fausto_importados_api.model.Product;
 import com.example.fausto_importados_api.model.enums.OrderStatus;
 import com.example.fausto_importados_api.repository.OrderRepository;
-import com.example.fausto_importados_api.services.exception.BusinessException;
-import com.example.fausto_importados_api.services.exception.ResourceNotFoundException;
+import com.example.fausto_importados_api.services.exception.InsufficientStockException;
+import com.example.fausto_importados_api.services.exception.InvalidOrderStatusException;
+import com.example.fausto_importados_api.services.exception.OrderNotFoundException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -59,10 +60,10 @@ public class OrderService {
     @Transactional
     public Order complete(UUID orderId) {
         Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
+                .orElseThrow(() -> new OrderNotFoundException("Order not found"));
 
         if (order.getStatus() != OrderStatus.PENDING)
-            throw new IllegalStateException("Only PENDING orders can be completed");
+            throw new InvalidOrderStatusException("Only PENDING orders can be completed");
 
         // Soma as quantidades por produto (caso o mesmo produto apareça em mais de um item)
         Map<UUID, Integer> quantitiesByProductId = order.getItems().stream()
@@ -77,7 +78,7 @@ public class OrderService {
             int available = product == null || product.getStockQuantity() == null ? 0 : product.getStockQuantity();
 
             if (available < item.getQuantity()) {
-                throw new BusinessException(
+                throw new InsufficientStockException(
                         "Estoque insuficiente para \"" + item.getProductName() + "\" (" + item.getProductSize() + "ml). " +
                                 "Disponível: " + available + " | Pedido: " + item.getQuantity()
                 );
@@ -93,10 +94,10 @@ public class OrderService {
     @Transactional
     public Order cancel(UUID orderId) {
         Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
+                .orElseThrow(() -> new OrderNotFoundException("Order not found"));
 
         if (order.getStatus() != OrderStatus.PENDING)
-            throw new IllegalStateException("Only PENDING orders can be cancelled");
+            throw new InvalidOrderStatusException("Only PENDING orders can be cancelled");
 
         order.setStatus(OrderStatus.CANCELLED);
         return orderRepository.save(order);
