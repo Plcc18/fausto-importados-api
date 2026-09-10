@@ -2,6 +2,7 @@ package com.example.fausto_importados_api.repository;
 
 import com.example.fausto_importados_api.model.Order;
 import com.example.fausto_importados_api.model.enums.OrderStatus;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -17,18 +18,22 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     // All orders sorted by date (notifications panel — shows all statuses, not filtered by hidden)
     List<Order> findAllByOrderByCreatedAtDesc();
 
-    // Orders by status, excluding those hidden from panel
+    // Orders by status, excluding those hidden from panel (only used for stats — items not needed)
     List<Order> findByStatusAndHiddenFromPanelFalseOrderByCreatedAtDesc(OrderStatus status);
 
-    // Orders by status, excluding those hidden from report
+    // Orders by status, excluding those hidden from report — mapped to DTOs with items, evita N+1
+    @EntityGraph(attributePaths = "items")
     List<Order> findByStatusAndHiddenFromReportFalseOrderByCreatedAtDesc(OrderStatus status);
 
     // For notifications: all statuses, not filtered by hidden
     List<Order> findByStatusOrderByCreatedAtDesc(OrderStatus status);
 
-    // For the notification panel — exclude archived files
+    // For the notification panel — exclude archived files. Mapeado com items, evita N+1
+    @EntityGraph(attributePaths = "items")
     List<Order> findByHiddenFromNotificationsFalseOrderByCreatedAtDesc();
 
+    // Mapeado com items, evita N+1
+    @EntityGraph(attributePaths = "items")
     List<Order> findByStatusAndHiddenFromNotificationsFalseOrderByCreatedAtDesc(OrderStatus status);
 
     @Modifying

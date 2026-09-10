@@ -1,7 +1,10 @@
 package com.example.fausto_importados_api.controller;
 
+import com.example.fausto_importados_api.dto.UserRequestDTO;
+import com.example.fausto_importados_api.dto.UserResponseDTO;
+import com.example.fausto_importados_api.dto.UserUpdateDTO;
+import com.example.fausto_importados_api.mapper.UserMapper;
 import com.example.fausto_importados_api.model.User;
-import com.example.fausto_importados_api.model.enums.Role;
 import com.example.fausto_importados_api.services.UserService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,8 +28,8 @@ public class UserController {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
-    // DTO de resposta do usuário
-    public record UserDTO(UUID id, String email, Role role) {}
+    @Autowired
+    private UserMapper userMapper;
 
     // DTO de resposta padrão
     public record ApiResponse(String timeStamp, String message) {}
@@ -34,29 +37,25 @@ public class UserController {
     // GET por ID
     @GetMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<UserDTO> getUser(@PathVariable UUID id) {
+    public ResponseEntity<UserResponseDTO> getUser(@PathVariable UUID id) {
         User u = userService.findById(id);
-        return ResponseEntity.ok(
-                new UserDTO(u.getId(), u.getEmail(), u.getRole())
-        );
+        return ResponseEntity.ok(userMapper.toResponseDTO(u));
     }
 
     // GET por email
     @GetMapping("/email/{email}")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<UserDTO> getUserByEmail(@PathVariable String email) {
+    public ResponseEntity<UserResponseDTO> getUserByEmail(@PathVariable String email) {
         User u = userService.findByEmail(email);
-        return ResponseEntity.ok(
-                new UserDTO(u.getId(), u.getEmail(), u.getRole())
-        );
+        return ResponseEntity.ok(userMapper.toResponseDTO(u));
     }
 
     // GET todos
     @GetMapping
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<List<UserDTO>> getAllUsers() {
-        List<UserDTO> list = userService.findAll().stream()
-                .map(u -> new UserDTO(u.getId(), u.getEmail(), u.getRole()))
+    public ResponseEntity<List<UserResponseDTO>> getAllUsers() {
+        List<UserResponseDTO> list = userService.findAll().stream()
+                .map(userMapper::toResponseDTO)
                 .toList();
 
         return ResponseEntity.ok(list);
@@ -65,9 +64,9 @@ public class UserController {
     // POST
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<ApiResponse> postUser(@Valid @RequestBody User u) {
+    public ResponseEntity<ApiResponse> postUser(@Valid @RequestBody UserRequestDTO dto) {
 
-        if (userService.existByEmail(u.getEmail())) {
+        if (userService.existByEmail(dto.email())) {
             return ResponseEntity.status(HttpStatus.CONFLICT)
                     .body(new ApiResponse(
                             Instant.now().toString(),
@@ -75,6 +74,7 @@ public class UserController {
                     ));
         }
 
+        User u = userMapper.toEntity(dto);
         u.setPassword(passwordEncoder.encode(u.getPassword()));
         userService.save(u);
 
@@ -90,14 +90,14 @@ public class UserController {
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse> putUser(
             @PathVariable UUID id,
-            @Valid @RequestBody User u
+            @Valid @RequestBody UserUpdateDTO dto
     ) {
         User existing = userService.findById(id);
 
-        existing.setEmail(u.getEmail());
+        userMapper.updateEntityFromRequest(existing, dto);
 
-        if (u.getPassword() != null && !u.getPassword().isBlank()) {
-            existing.setPassword(passwordEncoder.encode(u.getPassword()));
+        if (dto.password() != null && !dto.password().isBlank()) {
+            existing.setPassword(passwordEncoder.encode(existing.getPassword()));
         }
 
         userService.save(existing);
