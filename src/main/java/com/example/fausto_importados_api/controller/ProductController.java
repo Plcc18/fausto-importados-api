@@ -102,9 +102,7 @@ public class ProductController {
     public ResponseEntity<ApiResponse> decreaseStock(
             @RequestBody List<StockDecreaseItem> items
     ) {
-        for (StockDecreaseItem item : items) {
-            productService.decreaseStock(item.productId(), item.quantity());
-        }
+        items.forEach(item -> productService.decreaseStock(item.productId(), item.quantity()));
         return ResponseEntity.ok(
                 new ApiResponse(Instant.now().toString(), "Stock updated successfully")
         );

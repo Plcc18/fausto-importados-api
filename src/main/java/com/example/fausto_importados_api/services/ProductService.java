@@ -121,7 +121,7 @@ public class ProductService {
     public List<Product> decreaseStockBatch(Map<UUID, Integer> quantitiesByProductId) {
         List<Product> products = findAllActiveByIds(quantitiesByProductId.keySet());
 
-        for (Product product : products) {
+        products.forEach(product -> {
             int quantity = quantitiesByProductId.get(product.getId());
             int newQty = product.getStockQuantity() - quantity;
 
@@ -131,7 +131,7 @@ public class ProductService {
 
             product.setStockQuantity(newQty);
             product.setInStock(newQty > 0);
-        }
+        });
 
         return productRepository.saveAll(products);
     }

@@ -73,7 +73,7 @@ public class OrderService {
         Map<UUID, Product> productsById = productService.findAllActiveByIds(quantitiesByProductId.keySet()).stream()
                 .collect(Collectors.toMap(Product::getId, Function.identity()));
 
-        for (OrderItem item : order.getItems()) {
+        order.getItems().forEach(item -> {
             Product product = productsById.get(item.getProductId());
             int available = product == null || product.getStockQuantity() == null ? 0 : product.getStockQuantity();
 
@@ -83,7 +83,7 @@ public class OrderService {
                                 "Disponível: " + available + " | Pedido: " + item.getQuantity()
                 );
             }
-        }
+        });
 
         productService.decreaseStockBatch(quantitiesByProductId);
 
