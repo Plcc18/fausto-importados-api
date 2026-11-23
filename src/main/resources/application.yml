@@ -3,6 +3,10 @@ spring:
   application:
     name: fausto-importados-api
 
+  # Carrega variáveis do arquivo .env (se existir) — útil em desenvolvimento local
+  config:
+    import: "optional:file:.env[.properties]"
+
   # PostgreSQL
   datasource:
     url: "${DB_URL}"
