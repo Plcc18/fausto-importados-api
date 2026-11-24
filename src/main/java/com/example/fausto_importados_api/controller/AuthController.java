@@ -1,27 +1,40 @@
 package com.example.fausto_importados_api.controller;
 
+import com.example.fausto_importados_api.config.AuthProperties;
 import com.example.fausto_importados_api.dto.auth.AccessTokenResponseDTO;
 import com.example.fausto_importados_api.dto.auth.ErrorResponseDTO;
 import com.example.fausto_importados_api.dto.auth.JwtRequestDTO;
+import com.example.fausto_importados_api.dto.auth.LoginResponseDTO;
+import com.example.fausto_importados_api.dto.auth.MeResponseDTO;
+import com.example.fausto_importados_api.dto.auth.MfaRequests;
 import com.example.fausto_importados_api.model.User;
+import com.example.fausto_importados_api.repository.UserRepository;
 import com.example.fausto_importados_api.security.jwt.JwtAuthenticationFilter;
 import com.example.fausto_importados_api.security.jwt.JwtService;
+import com.example.fausto_importados_api.security.mfa.MfaException;
+import com.example.fausto_importados_api.security.mfa.MfaService;
 import com.example.fausto_importados_api.security.refresh.RefreshCookieFactory;
 import com.example.fausto_importados_api.security.refresh.RefreshRequestGuard;
 import com.example.fausto_importados_api.security.refresh.RefreshTokenService;
+import com.example.fausto_importados_api.security.throttle.LoginThrottle;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @RestController
@@ -33,44 +46,148 @@ public class AuthController {
     private final RefreshTokenService refreshTokenService;
     private final RefreshCookieFactory cookies;
     private final RefreshRequestGuard refreshGuard;
+    private final LoginThrottle throttle;
+    private final MfaService mfaService;
+    private final UserRepository users;
+    private final AuthProperties props;
+    private final Clock clock;
 
     public AuthController(
             AuthenticationManager authenticationManager,
             JwtService jwtService,
             RefreshTokenService refreshTokenService,
             RefreshCookieFactory cookies,
-            RefreshRequestGuard refreshGuard
+            RefreshRequestGuard refreshGuard,
+            LoginThrottle throttle,
+            MfaService mfaService,
+            UserRepository users,
+            AuthProperties props,
+            Clock clock
     ) {
         this.authenticationManager = authenticationManager;
         this.jwtService = jwtService;
         this.refreshTokenService = refreshTokenService;
         this.cookies = cookies;
         this.refreshGuard = refreshGuard;
+        this.throttle = throttle;
+        this.mfaService = mfaService;
+        this.users = users;
+        this.props = props;
+        this.clock = clock;
     }
 
-    /** Autentica e abre uma sessão: access token no corpo, refresh token no cookie HttpOnly. */
+    // ───────────────────────────── login ─────────────────────────────
+
+    /**
+     * Confere a senha. Administradores ainda precisam do 2FA: a resposta traz um desafio ({@code MFA_REQUIRED}
+     * ou {@code MFA_SETUP_REQUIRED}) e a sessão só abre depois do segundo passo. Demais usuários abrem a
+     * sessão aqui: access token no corpo, refresh token no cookie HttpOnly.
+     */
     @PostMapping("/login")
-    public ResponseEntity<AccessTokenResponseDTO> login(
-            @Valid @RequestBody JwtRequestDTO request,
-            HttpServletRequest http
-    ) {
-        Authentication authentication = authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(
-                        request.email(),
-                        request.password()
-                )
-        );
+    public ResponseEntity<?> login(@Valid @RequestBody JwtRequestDTO request, HttpServletRequest http) {
+        String ip = ClientInfo.ip(http);
+        Optional<Duration> locked = throttle.lockedFor(request.email(), ip);
+        if (locked.isPresent()) {
+            return tooManyAttempts(locked.get());
+        }
+
+        Authentication authentication;
+        try {
+            authentication = authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(request.email(), request.password())
+            );
+        } catch (AuthenticationException e) {
+            throttle.recordFailure(request.email(), ip);
+            throw e; // resposta genérica em AuthExceptionHandler
+        }
 
         User user = (User) authentication.getPrincipal();
-        RefreshTokenService.NewSession session = refreshTokenService.startSession(
-                user, http.getHeader(HttpHeaders.USER_AGENT), ClientInfo.ip(http)
-        );
 
-        return ResponseEntity.ok()
-                .header(HttpHeaders.SET_COOKIE, cookies.issue(session.refreshToken()).toString())
-                .header(HttpHeaders.SET_COOKIE, cookies.clearLegacy().toString())
-                .body(accessToken(user, session.sessionId()));
+        if (user.isAdmin() && (props.mfaRequired() || user.isTotpEnabled())) {
+            if (user.isTotpEnabled()) {
+                return ResponseEntity.ok(LoginResponseDTO.mfaRequired(jwtService.generateMfaChallenge(user)));
+            }
+            if (enrollmentExpired(user)) {
+                // Mesma resposta de uma senha errada: não revela que a senha conferiu.
+                throw new BadCredentialsException("Enrollment window expired");
+            }
+            return ResponseEntity.ok(LoginResponseDTO.mfaSetupRequired(
+                    jwtService.generateMfaChallenge(user), user.isMustChangePassword()));
+        }
+
+        return openSession(user, http, null);
     }
+
+    /** Segundo fator do login: código do autenticador ou código de recuperação. */
+    @PostMapping("/login/mfa")
+    public ResponseEntity<?> loginMfa(@Valid @RequestBody MfaRequests.Verify request, HttpServletRequest http) {
+        String ip = ClientInfo.ip(http);
+        Optional<User> found = challengeUser(request.challenge()).filter(User::isTotpEnabled);
+        if (found.isEmpty()) {
+            return error(HttpStatus.UNAUTHORIZED, "Invalid or expired challenge");
+        }
+        User user = found.get();
+
+        Optional<Duration> locked = throttle.lockedFor(user.getEmail(), ip);
+        if (locked.isPresent()) {
+            return tooManyAttempts(locked.get());
+        }
+        if (mfaService.verify(user.getId(), request.code()).isEmpty()) {
+            throttle.recordFailure(user.getEmail(), ip);
+            return error(HttpStatus.UNAUTHORIZED, "Invalid verification code");
+        }
+        return openSession(user, http, null);
+    }
+
+    /** Primeiro passo do cadastro do 2FA: gera o segredo (pendente) para o QR code / chave manual. */
+    @PostMapping("/mfa/setup")
+    public ResponseEntity<?> mfaSetup(@Valid @RequestBody MfaRequests.Setup request, HttpServletRequest http) {
+        Optional<User> found = challengeUser(request.challenge()).filter(u -> !u.isTotpEnabled());
+        if (found.isEmpty() || enrollmentExpired(found.get())) {
+            return error(HttpStatus.UNAUTHORIZED, "Invalid or expired challenge");
+        }
+        User user = found.get();
+
+        Optional<Duration> locked = throttle.lockedFor(user.getEmail(), ClientInfo.ip(http));
+        if (locked.isPresent()) {
+            return tooManyAttempts(locked.get());
+        }
+        MfaService.Setup setup = mfaService.beginSetup(user.getId());
+        return ResponseEntity.ok(new MfaRequests.SetupInfo(setup.secret(), setup.otpauthUri()));
+    }
+
+    /**
+     * Fim do cadastro: confere o primeiro código, ativa o 2FA, troca a senha temporária (se for o caso),
+     * devolve os códigos de recuperação (única vez) e abre a sessão.
+     */
+    @PostMapping("/mfa/setup/confirm")
+    public ResponseEntity<?> mfaSetupConfirm(@Valid @RequestBody MfaRequests.Confirm request, HttpServletRequest http) {
+        String ip = ClientInfo.ip(http);
+        Optional<User> found = challengeUser(request.challenge()).filter(u -> !u.isTotpEnabled());
+        if (found.isEmpty() || enrollmentExpired(found.get())) {
+            return error(HttpStatus.UNAUTHORIZED, "Invalid or expired challenge");
+        }
+        User user = found.get();
+
+        Optional<Duration> locked = throttle.lockedFor(user.getEmail(), ip);
+        if (locked.isPresent()) {
+            return tooManyAttempts(locked.get());
+        }
+
+        List<String> recoveryCodes;
+        try {
+            recoveryCodes = mfaService.confirmSetup(user.getId(), request.code(), request.newPassword());
+        } catch (MfaException e) {
+            if (e.reason() == MfaException.Reason.INVALID_CODE) {
+                throttle.recordFailure(user.getEmail(), ip);
+            }
+            throw e;
+        }
+        User enrolled = users.findById(user.getId()).orElseThrow();
+        return openSession(enrolled, http, recoveryCodes);
+    }
+
+    // ───────────────────────────── refresh ─────────────────────────────
 
     /**
      * Renova o access token e rotaciona o refresh token (sessão deslizante).
@@ -101,13 +218,15 @@ public class AuthController {
         return error(HttpStatus.UNAUTHORIZED, "Unauthorized");
     }
 
-    // Endpoint usado pelo frontend para verificar a sessão com o access token atual.
+    // ───────────────────────────── sessão ─────────────────────────────
+
+    /** Verifica a sessão com o access token atual e diz quem é (o front usa a role para mostrar ou não o painel). */
     @GetMapping("/me")
-    public ResponseEntity<Void> me(@AuthenticationPrincipal UserDetails userDetails) {
-        if (userDetails == null) {
+    public ResponseEntity<MeResponseDTO> me(@AuthenticationPrincipal User user) {
+        if (user == null) {
             return ResponseEntity.status(401).build();
         }
-        return ResponseEntity.ok().build();
+        return ResponseEntity.ok(new MeResponseDTO(user.getEmail(), user.getRole().name()));
     }
 
     /**
@@ -134,6 +253,40 @@ public class AuthController {
         return clearedCookies();
     }
 
+    // ───────────────────────────── internos ─────────────────────────────
+
+    /** Abre a sessão (login completo): zera o contador de falhas da conta e entrega os tokens. */
+    private ResponseEntity<LoginResponseDTO> openSession(User user, HttpServletRequest http, List<String> recoveryCodes) {
+        RefreshTokenService.NewSession session = refreshTokenService.startSession(
+                user, http.getHeader(HttpHeaders.USER_AGENT), ClientInfo.ip(http)
+        );
+        throttle.recordSuccess(user.getEmail());
+
+        String access = jwtService.generateAccessToken(user, session.sessionId());
+        long expiresIn = jwtService.accessTtl().toSeconds();
+        LoginResponseDTO body = recoveryCodes == null
+                ? LoginResponseDTO.authenticated(access, expiresIn)
+                : LoginResponseDTO.enrolled(access, expiresIn, recoveryCodes);
+
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, cookies.issue(session.refreshToken()).toString())
+                .header(HttpHeaders.SET_COOKIE, cookies.clearLegacy().toString())
+                .body(body);
+    }
+
+    /** Usuário dono do desafio de 2FA, se o desafio é válido e a conta ainda é um administrador ativo. */
+    private Optional<User> challengeUser(String challenge) {
+        return jwtService.parseMfaChallenge(challenge)
+                .flatMap(users::findById)
+                .filter(User::isEnabled)
+                .filter(User::isAdmin);
+    }
+
+    private boolean enrollmentExpired(User user) {
+        Instant deadline = user.getEnrollmentExpiresAt();
+        return deadline != null && !clock.instant().isBefore(deadline);
+    }
+
     private ResponseEntity<Void> clearedCookies() {
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, cookies.clear().toString())
@@ -146,6 +299,13 @@ public class AuthController {
                 jwtService.generateAccessToken(user, sessionId),
                 jwtService.accessTtl().toSeconds()
         );
+    }
+
+    private static ResponseEntity<ErrorResponseDTO> tooManyAttempts(Duration retryAfter) {
+        long seconds = Math.max(1, retryAfter.plusMillis(999).toSeconds());
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, Long.toString(seconds))
+                .body(new ErrorResponseDTO(Instant.now().toString(), "Too many attempts. Try again later."));
     }
 
     private static ResponseEntity<ErrorResponseDTO> error(HttpStatus status, String message) {

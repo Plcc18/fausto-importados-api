@@ -17,8 +17,9 @@
 #   CLOUDINARY_NAME
 #   CLOUDINARY_KEY
 #   CLOUDINARY_SECRET
-#   ADMIN_EMAIL           - email do admin criado automaticamente na primeira execução
-#   ADMIN_PASSWORD        - senha do admin criado automaticamente na primeira execução
+#   TOTP_ENCRYPTION_KEY   - chave AES-256 em base64 (openssl rand -base64 32) que cifra os segredos do 2FA. OBRIGATÓRIA
+#   ADMIN_EMAIL           - email do PRIMEIRO admin (criado só se ainda não houver nenhum)
+#   ADMIN_PASSWORD        - senha do primeiro admin (o 2FA é cadastrado no primeiro login)
 #   PORT                  - opcional (default: 8080)
 #
 # Perfis disponíveis (spring.profiles.active=dev|prod):
@@ -53,6 +54,8 @@ logging:
 security:
   jwt:
     secret: "${JWT_SECRET}"
+  totp:
+    encryption-key: "${TOTP_ENCRYPTION_KEY:}"
   auth:
     access-ttl: "${JWT_ACCESS_TTL:PT15M}"
     refresh-inactivity: "${REFRESH_INACTIVITY:P7D}"
@@ -70,8 +73,8 @@ springdoc:
   swagger-ui:
     path: /swagger-ui.html
 
-ADMIN_EMAIL: "${ADMIN_EMAIL}"
-ADMIN_PASSWORD: "${ADMIN_PASSWORD}"
+ADMIN_EMAIL: "${ADMIN_EMAIL:}"
+ADMIN_PASSWORD: "${ADMIN_PASSWORD:}"
 
 management:
   endpoints:

@@ -28,6 +28,10 @@ server:
 security:
   jwt:
     secret: "${JWT_SECRET}"
+  # 2FA (TOTP): chave AES-256 (base64, 32 bytes) que cifra os segredos em repouso. OBRIGATÓRIA.
+  # Gere com: openssl rand -base64 32. Perder esta chave obriga todos os admins a refazer o 2FA.
+  totp:
+    encryption-key: "${TOTP_ENCRYPTION_KEY:}"
   auth:
     access-ttl: "${JWT_ACCESS_TTL:PT15M}"
     refresh-inactivity: "${REFRESH_INACTIVITY:P7D}"
@@ -48,8 +52,8 @@ springdoc:
     path: /swagger-ui.html
 
 # Admin
-ADMIN_EMAIL: "${ADMIN_EMAIL}"
-ADMIN_PASSWORD: "${ADMIN_PASSWORD}"
+ADMIN_EMAIL: "${ADMIN_EMAIL:}"
+ADMIN_PASSWORD: "${ADMIN_PASSWORD:}"
 
 # Logging menos verboso em producao
 logging:

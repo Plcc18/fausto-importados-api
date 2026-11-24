@@ -26,8 +26,12 @@ import java.util.UUID;
 @Service
 public class JwtService {
 
+    static final String PURPOSE = "purpose";
+    static final String PURPOSE_MFA_CHALLENGE = "mfa-challenge";
+
     private final SecretKey signingKey;
     private final Duration accessTtl;
+    private final Duration mfaChallengeTtl;
     private final Clock clock;
 
     public JwtService(
@@ -37,6 +41,7 @@ public class JwtService {
     ) {
         this.signingKey = Keys.hmacShaKeyFor(Decoders.BASE64.decode(jwtSecret));
         this.accessTtl = properties.accessTtl();
+        this.mfaChallengeTtl = properties.mfaChallengeTtl();
         this.clock = clock;
     }
 
@@ -89,6 +94,38 @@ public class JwtService {
         }
     }
 
+    /**
+     * Desafio emitido depois que a SENHA conferiu e antes do segundo fator. Não é um access token: não tem
+     * {@code sid} e carrega {@code purpose}, então o filtro o recusa como Bearer. Serve só para os passos do 2FA.
+     */
+    public String generateMfaChallenge(User user) {
+        Date now = Date.from(clock.instant());
+        Date expiration = Date.from(clock.instant().plus(mfaChallengeTtl));
+        return Jwts.builder()
+                .subject(user.getId().toString())
+                .claim(PURPOSE, PURPOSE_MFA_CHALLENGE)
+                .issuedAt(now)
+                .expiration(expiration)
+                .signWith(signingKey)
+                .compact();
+    }
+
+    /** @return id do usuário do desafio, ou vazio se for inválido, expirado ou de outro tipo de token */
+    public Optional<UUID> parseMfaChallenge(String token) {
+        if (token == null || token.isBlank()) {
+            return Optional.empty();
+        }
+        try {
+            Claims claims = parser().parseSignedClaims(token).getPayload();
+            if (!PURPOSE_MFA_CHALLENGE.equals(claims.get(PURPOSE, String.class))) {
+                return Optional.empty();
+            }
+            return Optional.of(UUID.fromString(claims.getSubject()));
+        } catch (JwtException | IllegalArgumentException e) {
+            return Optional.empty();
+        }
+    }
+
     public boolean isTokenValid(String token) {
         try {
             parse(token);
@@ -106,6 +143,10 @@ public class JwtService {
     }
 
     private AccessClaims toAccessClaims(Claims claims) {
+        // Tokens de outra finalidade (desafio de 2FA...) e tokens sem sessão nunca valem como access token.
+        if (claims.get(PURPOSE) != null || claims.get("sid") == null || claims.get("role") == null) {
+            throw new IllegalArgumentException("Not an access token");
+        }
         return new AccessClaims(
                 UUID.fromString(claims.getSubject()),
                 claims.get("role", String.class),

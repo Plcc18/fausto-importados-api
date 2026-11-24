@@ -23,13 +23,13 @@ Desenvolvida com foco em simplicidade, escalabilidade e pronta para integração
 
 | Módulo           | Funcionalidades                   |
 | ---------------- | --------------------------------- |
-| **Autenticação** | Login com JWT (admin)             |
+| **Autenticação** | Login com JWT + 2FA (TOTP) para admins |
 | **Produtos**     | CRUD completo + upload de imagens |
 | **Pedidos**      | Criação e consulta de pedidos     |
 | **Pagamentos**   | Registro e controle de transações |
 
-> Apenas usuários **ADMIN** possuem acesso autenticado ao sistema.
-> Clientes não possuem login — o fluxo de compra pode ser integrado com WhatsApp ou frontend.
+> Apenas usuários **ADMIN** acessam a área administrativa (2FA obrigatório). Existe também a role `USER`
+> (sem acesso administrativo); não há cadastro público. Clientes compram sem login (WhatsApp/frontend).
 
 ---
 
@@ -66,19 +66,30 @@ payments (id, order_id, amount, payment_method, status)
 
 Access token (JWT, 15 min) + refresh token opaco com **sessão deslizante** e rotação.
 
-| Método | Endpoint            | Descrição                                                        | Acesso                      |
-| ------ | ------------------- | ---------------------------------------------------------------- | --------------------------- |
-| POST   | `/auth/login`       | Abre a sessão: access token no corpo, refresh token em cookie    | Público                     |
-| POST   | `/auth/refresh`     | Troca o refresh token por um novo e devolve um novo access token | Cookie + `Origin` + header  |
-| GET    | `/auth/me`          | Valida a sessão atual                                            | Bearer                      |
-| POST   | `/auth/logout`      | Revoga a sessão atual e limpa o cookie                           | Bearer (aceita já vencido)  |
-| POST   | `/auth/logout-all`  | Revoga todas as sessões do usuário                               | Bearer                      |
+| Método | Endpoint                  | Descrição                                                                    | Acesso                     |
+| ------ | ------------------------- | ---------------------------------------------------------------------------- | -------------------------- |
+| POST   | `/auth/login`             | Confere a senha. Admin recebe um desafio de 2FA; os demais abrem a sessão    | Público (limitado)         |
+| POST   | `/auth/login/mfa`         | Segundo fator: código do autenticador ou de recuperação → abre a sessão      | Desafio (limitado)         |
+| POST   | `/auth/mfa/setup`         | Gera o segredo do 2FA (QR/chave) de uma conta que ainda não o tem            | Desafio                    |
+| POST   | `/auth/mfa/setup/confirm` | Confirma o 1º código, ativa o 2FA, devolve os códigos de recuperação         | Desafio (limitado)         |
+| POST   | `/auth/refresh`           | Troca o refresh token por um novo e devolve um novo access token             | Cookie + `Origin` + header |
+| GET    | `/auth/me`                | Quem está logado: `{ email, role }`                                          | Bearer                     |
+| POST   | `/auth/logout`            | Revoga a sessão atual e limpa o cookie                                       | Bearer (aceita já vencido) |
+| POST   | `/auth/logout-all`        | Revoga todas as sessões do usuário                                           | Bearer                     |
 
 ```json
 // POST /auth/login
 { "email": "admin@fausto.com", "password": "123456" }
-// → 200 { "accessToken": "<jwt>", "expiresIn": 900 }  +  Set-Cookie: refresh_token=...
+// usuário comum → 200 { "status": "AUTHENTICATED", "accessToken": "<jwt>", "expiresIn": 900 } + Set-Cookie: refresh_token=...
+// admin com 2FA  → 200 { "status": "MFA_REQUIRED", "challenge": "<jwt de 5 min>" }            (sem sessão ainda)
+// admin sem 2FA  → 200 { "status": "MFA_SETUP_REQUIRED", "challenge": "...", "passwordChangeRequired": false }
+// muitas falhas  → 429 + Retry-After
 ```
+
+**Login do administrador (2FA obrigatório):** senha → `challenge` → `POST /auth/login/mfa { challenge, code }`.
+No primeiro acesso (conta sem 2FA): `POST /auth/mfa/setup { challenge }` devolve `secret` (Base32) e `otpauthUri`
+(o front desenha o QR); `POST /auth/mfa/setup/confirm { challenge, code, newPassword? }` ativa o 2FA, devolve 10
+`recoveryCodes` (aparecem **uma única vez**) e abre a sessão. O `challenge` não vale como access token.
 
 Como funciona:
 
@@ -90,6 +101,18 @@ Como funciona:
 - **Revogação**: logout, "sair de todos" e troca de senha (`PUT /api/user/{id}` com senha) revogam sessões; vale imediatamente porque o filtro confere o `sid` a cada request.
 - **Limpeza**: `RefreshTokenCleanupJob` apaga tokens vencidos diariamente (cron em `security.auth.cleanup-cron`).
 - Erros de login/refresh são genéricos e não revelam a causa.
+- **2FA (TOTP, RFC 6238)**: códigos de 6 dígitos / 30 s via biblioteca `java-otp`; aceita ±1 passo de relógio e
+  cada código vale **uma vez** (o último passo aceito fica no banco, atualizado de forma atômica). O segredo é
+  cifrado em repouso com **AES-256-GCM** (`TOTP_ENCRYPTION_KEY`; o id do usuário entra como AAD). Códigos de
+  recuperação: 10, 80 bits, só o hash SHA-256 é guardado, uso único.
+- **Força bruta**: bloqueio temporário progressivo **por conta** (5 falhas → 1 min, dobrando até 30 min) e por IP
+  (20 falhas → 5 min...). Senha errada e código 2FA errado somam no mesmo contador, e e-mails inexistentes contam
+  igual (o bloqueio não revela se a conta existe). Os contadores ficam no PostgreSQL (`auth_throttle`).
+  O IP é o **último** item de `X-Forwarded-For` (o anterior pode ser forjado); atrás do proxy da Vercel esse IP é
+  o da própria Vercel, por isso o controle principal é por conta.
+- **Primeiro admin**: criado no startup só se não existir nenhum, a partir de `ADMIN_EMAIL`/`ADMIN_PASSWORD`;
+  o 2FA é cadastrado no primeiro login e as duas variáveis podem sair do ambiente depois.
+- **401 × 403**: sem token (ou token inválido) → 401; autenticado sem permissão (ex.: `USER` numa rota admin) → 403.
 
 > `JWT_EXPIRATION` (24h) não é mais usado. Use `JWT_ACCESS_TTL` (ISO-8601, padrão `PT15M`). Remova a variável antiga do ambiente de produção.
 
@@ -179,6 +202,11 @@ export CLOUDINARY_NAME=seu_cloud_name
 export CLOUDINARY_KEY=sua_api_key
 export CLOUDINARY_SECRET=sua_api_secret
 
+# Chave AES-256 (base64, 32 bytes) que cifra os segredos do 2FA. OBRIGATÓRIA — a API não sobe sem ela.
+# Guarde uma cópia fora do Render: perdê-la obriga todos os admins a refazer o 2FA.
+export TOTP_ENCRYPTION_KEY=$(openssl rand -base64 32)
+
+# Só para criar o PRIMEIRO admin (quando ainda não existe nenhum); depois do 1º login podem sair do ambiente
 export ADMIN_EMAIL=admin@fausto.com
 export ADMIN_PASSWORD=sua_senha_de_admin
 ```
@@ -266,9 +294,11 @@ mvn flyway:migrate
 
 ## Segurança
 
-* Autenticação via **JWT**
+* Autenticação via **JWT** (access token curto) + refresh token rotativo
+* **2FA (TOTP)** obrigatório para ADMIN, com códigos de recuperação
+* Bloqueio temporário progressivo contra força bruta
 * Senhas com **BCrypt**
-* Acesso restrito para **ADMIN**
+* Acesso restrito para **ADMIN** (401 sem login, 403 sem permissão)
 * Endpoints públicos:
 
     * `/api/auth/**`

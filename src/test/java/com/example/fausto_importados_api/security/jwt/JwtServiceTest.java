@@ -42,7 +42,7 @@ class JwtServiceTest {
     }
 
     private static AuthProperties props() {
-        return new AuthProperties(Duration.ofMinutes(15), Duration.ofDays(7), Duration.ofDays(30), Duration.ofSeconds(10));
+        return AuthProperties.defaults();
     }
 
     @Test

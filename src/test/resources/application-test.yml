@@ -20,8 +20,13 @@ spring:
 security:
   jwt:
     secret: "uO4esMFBh12md6KkXNSa36cP7OoVIiqAhIoI3dpxY5E="
+  # Chave de teste (32 bytes em base64), nunca usada fora dos testes
+  totp:
+    encryption-key: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
   # Prazos de produção (os testes avançam o tempo com um Clock controlável)
   auth:
+    # Os testes de fluxo de sessão não exercitam o 2FA; os de 2FA ligam de novo (ver MfaFlowTest)
+    mfa-required: false
     access-ttl: PT15M
     refresh-inactivity: P7D
     refresh-absolute: P30D
