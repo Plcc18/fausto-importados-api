@@ -5,6 +5,7 @@ import com.example.fausto_importados_api.repository.AuditLogRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PagedModel;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -41,7 +42,7 @@ public class AuditController {
 
     @GetMapping
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<Page<Entry>> list(
+    public ResponseEntity<PagedModel<Entry>> list(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size,
             @RequestParam(required = false) String action,
@@ -61,6 +62,6 @@ public class AuditController {
         } else {
             rows = repository.findAllByOrderByOccurredAtDesc(pageable);
         }
-        return ResponseEntity.ok(rows.map(Entry::from));
+        return ResponseEntity.ok(new PagedModel<>(rows.map(Entry::from)));
     }
 }
