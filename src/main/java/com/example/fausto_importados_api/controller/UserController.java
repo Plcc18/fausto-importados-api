@@ -1,138 +1,112 @@
 package com.example.fausto_importados_api.controller;
 
+import com.example.fausto_importados_api.dto.UserActiveDTO;
+import com.example.fausto_importados_api.dto.UserCredentialsResponseDTO;
 import com.example.fausto_importados_api.dto.UserRequestDTO;
 import com.example.fausto_importados_api.dto.UserResponseDTO;
 import com.example.fausto_importados_api.dto.UserUpdateDTO;
 import com.example.fausto_importados_api.mapper.UserMapper;
 import com.example.fausto_importados_api.model.User;
-import com.example.fausto_importados_api.security.refresh.RefreshTokenService;
+import com.example.fausto_importados_api.security.reauth.RequiresReauth;
+import com.example.fausto_importados_api.services.AdminAccountService;
 import com.example.fausto_importados_api.services.UserService;
 import jakarta.validation.Valid;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Gestão de contas administrativas. Leitura: qualquer ADMIN. Alterações: ADMIN com reautenticação recente
+ * (código 2FA), e sempre registradas na auditoria. Não existe rota que defina a senha de OUTRA pessoa: contas
+ * novas e redefinições recebem uma senha temporária gerada pelo servidor.
+ */
 @RestController
 @RequestMapping("/api/user")
 public class UserController {
 
-    @Autowired
-    private UserService userService;
+    private final UserService userService;
+    private final AdminAccountService accounts;
+    private final UserMapper userMapper;
 
-    @Autowired
-    private PasswordEncoder passwordEncoder;
-
-    @Autowired
-    private UserMapper userMapper;
-
-    @Autowired
-    private RefreshTokenService refreshTokenService;
+    public UserController(UserService userService, AdminAccountService accounts, UserMapper userMapper) {
+        this.userService = userService;
+        this.accounts = accounts;
+        this.userMapper = userMapper;
+    }
 
     // DTO de resposta padrão
     public record ApiResponse(String timeStamp, String message) {}
 
-    // GET por ID
     @GetMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<UserResponseDTO> getUser(@PathVariable UUID id) {
-        User u = userService.findById(id);
-        return ResponseEntity.ok(userMapper.toResponseDTO(u));
+        return ResponseEntity.ok(userMapper.toResponseDTO(userService.findById(id)));
     }
 
-    // GET por email
     @GetMapping("/email/{email}")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<UserResponseDTO> getUserByEmail(@PathVariable String email) {
-        User u = userService.findByEmail(email);
-        return ResponseEntity.ok(userMapper.toResponseDTO(u));
+        return ResponseEntity.ok(userMapper.toResponseDTO(userService.findByEmail(email)));
     }
 
-    // GET todos
     @GetMapping
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<List<UserResponseDTO>> getAllUsers() {
         List<UserResponseDTO> list = userService.findAll().stream()
                 .map(userMapper::toResponseDTO)
                 .toList();
-
         return ResponseEntity.ok(list);
     }
 
-    // POST
+    /** Cria um administrador. Devolve a senha temporária UMA vez; o novo admin a troca ao cadastrar o 2FA. */
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<ApiResponse> postUser(@Valid @RequestBody UserRequestDTO dto) {
-
-        if (userService.existByEmail(dto.email())) {
-            return ResponseEntity.status(HttpStatus.CONFLICT)
-                    .body(new ApiResponse(
-                            Instant.now().toString(),
-                            "User already registered"
-                    ));
-        }
-
-        User u = userMapper.toEntity(dto);
-        u.setPassword(passwordEncoder.encode(u.getPassword()));
-        userService.save(u);
-
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(new ApiResponse(
-                        Instant.now().toString(),
-                        "User created successfully"
-                ));
+    @RequiresReauth
+    public ResponseEntity<UserCredentialsResponseDTO> postUser(@Valid @RequestBody UserRequestDTO dto) {
+        AdminAccountService.Credentials created = accounts.create(dto.email());
+        return ResponseEntity.status(HttpStatus.CREATED).body(toCredentials(created));
     }
 
-    // PUT
     @PutMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<ApiResponse> putUser(
-            @PathVariable UUID id,
-            @Valid @RequestBody UserUpdateDTO dto
-    ) {
-        User existing = userService.findById(id);
-
-        userMapper.updateEntityFromRequest(existing, dto);
-
-        boolean passwordChanged = dto.password() != null && !dto.password().isBlank();
-        if (passwordChanged) {
-            existing.setPassword(passwordEncoder.encode(existing.getPassword()));
-        }
-
-        userService.save(existing);
-
-        // Troca de senha derruba todas as sessões do usuário (todos os dispositivos precisam logar de novo).
-        if (passwordChanged) {
-            refreshTokenService.revokeAllSessions(existing.getId());
-        }
-
-        return ResponseEntity.ok(
-                new ApiResponse(
-                        Instant.now().toString(),
-                        "User updated successfully"
-                )
-        );
+    @RequiresReauth
+    public ResponseEntity<ApiResponse> putUser(@PathVariable UUID id, @Valid @RequestBody UserUpdateDTO dto) {
+        accounts.changeEmail(id, dto.email());
+        return ResponseEntity.ok(new ApiResponse(Instant.now().toString(), "User updated successfully"));
     }
 
-    // DELETE
+    /** Ativa ou desativa uma conta. Desativar encerra todas as sessões dela na hora. */
+    @PatchMapping("/{id}/active")
+    @PreAuthorize("hasRole('ADMIN')")
+    @RequiresReauth
+    public ResponseEntity<UserResponseDTO> setActive(@PathVariable UUID id, @Valid @RequestBody UserActiveDTO dto) {
+        return ResponseEntity.ok(userMapper.toResponseDTO(accounts.setActive(id, dto.active())));
+    }
+
+    /** Senha esquecida ou aparelho perdido: nova senha temporária e 2FA a refazer. */
+    @PostMapping("/{id}/reset-credentials")
+    @PreAuthorize("hasRole('ADMIN')")
+    @RequiresReauth
+    public ResponseEntity<UserCredentialsResponseDTO> resetCredentials(@PathVariable UUID id) {
+        return ResponseEntity.ok(toCredentials(accounts.resetCredentials(id)));
+    }
+
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
+    @RequiresReauth
     public ResponseEntity<ApiResponse> deleteUser(@PathVariable UUID id) {
-        User u = userService.findById(id);
-        userService.delete(u);
+        accounts.delete(id);
+        return ResponseEntity.ok(new ApiResponse(Instant.now().toString(), "User deleted successfully"));
+    }
 
-        return ResponseEntity.ok(
-                new ApiResponse(
-                        Instant.now().toString(),
-                        "User deleted successfully"
-                )
-        );
+    private UserCredentialsResponseDTO toCredentials(AdminAccountService.Credentials credentials) {
+        User user = credentials.user();
+        return new UserCredentialsResponseDTO(
+                user.getId(), user.getEmail(), credentials.temporaryPassword(), user.getEnrollmentExpiresAt());
     }
 }
-

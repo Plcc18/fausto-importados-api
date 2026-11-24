@@ -40,7 +40,6 @@ import java.util.concurrent.Future;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 
 /**
  * Fluxo completo de autenticação (login, refresh deslizante, rotação, reuso, logout) contra o
@@ -363,28 +362,31 @@ class AuthFlowTest {
     }
 
     @Test
-    void changingThePassword_revokesAllSessionsOfThatUser() throws Exception {
+    void changingYourOwnPassword_revokesTheOtherSessionsAndKeepsTheCurrentOne() throws Exception {
         User other = new User();
         other.setEmail("troca-senha@test.com");
-        other.setPassword(passwordEncoder.encode("senha-antiga"));
+        other.setPassword(passwordEncoder.encode("senha-antiga-bem-longa"));
         other.setRole(Role.ADMIN);
         other.setActive(true);
-        other = users.save(other);
+        users.save(other);
 
-        MvcResult s1 = login("troca-senha@test.com", "senha-antiga");
-        MvcResult s2 = login("troca-senha@test.com", "senha-antiga");
+        MvcResult phone = login("troca-senha@test.com", "senha-antiga-bem-longa");
+        MvcResult laptop = login("troca-senha@test.com", "senha-antiga-bem-longa");
 
-        MvcResult change = mvc.perform(put("/api/user/" + other.getId())
-                .header("Authorization", "Bearer " + accessToken(s1))
+        MvcResult change = mvc.perform(post("/auth/password")
+                .header("Authorization", "Bearer " + accessToken(phone))
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"email\":\"troca-senha@test.com\",\"password\":\"senha-nova\"}")).andReturn();
-        assertThat(change.getResponse().getStatus()).isEqualTo(200);
+                .content("{\"currentPassword\":\"senha-antiga-bem-longa\",\"newPassword\":\"senha-nova-bem-longa\"}")).andReturn();
+        assertThat(change.getResponse().getStatus()).isEqualTo(204);
 
-        assertThat(refresh(cookieValue(s1)).getResponse().getStatus()).isEqualTo(401);
-        assertThat(refresh(cookieValue(s2)).getResponse().getStatus()).isEqualTo(401);
-        assertThat(me(accessToken(s2))).isEqualTo(401);
-        assertThat(login("troca-senha@test.com", "senha-antiga").getResponse().getStatus()).isEqualTo(401);
-        assertThat(login("troca-senha@test.com", "senha-nova").getResponse().getStatus()).isEqualTo(200);
+        // a sessão que trocou a senha continua; as outras caem na hora
+        assertThat(me(accessToken(phone))).isEqualTo(200);
+        assertThat(refresh(cookieValue(phone)).getResponse().getStatus()).isEqualTo(200);
+        assertThat(refresh(cookieValue(laptop)).getResponse().getStatus()).isEqualTo(401);
+        assertThat(me(accessToken(laptop))).isEqualTo(401);
+
+        assertThat(login("troca-senha@test.com", "senha-antiga-bem-longa").getResponse().getStatus()).isEqualTo(401);
+        assertThat(login("troca-senha@test.com", "senha-nova-bem-longa").getResponse().getStatus()).isEqualTo(200);
     }
 
     // ───────────────────────────── limpeza ─────────────────────────────

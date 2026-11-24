@@ -17,6 +17,8 @@ import java.time.Duration;
  * @param mfaRequired       exige 2FA (TOTP) de todo administrador. NUNCA desligue em produção: existe só para
  *                          os testes que não exercitam o 2FA.
  * @param mfaChallengeTtl   validade do desafio emitido depois da senha, enquanto o código TOTP não chega
+ * @param reauthTtl         validade da reautenticação (operações sensíveis pedem um código recente)
+ * @param enrollmentWindow  prazo para um admin recém-criado (ou redefinido) concluir o cadastro do 2FA
  * @param throttle          proteção contra tentativas em excesso no login
  */
 @ConfigurationProperties(prefix = "security.auth")
@@ -27,6 +29,8 @@ public record AuthProperties(
         @DefaultValue("PT10S") Duration refreshGrace,
         @DefaultValue("true") boolean mfaRequired,
         @DefaultValue("PT5M") Duration mfaChallengeTtl,
+        @DefaultValue("PT5M") Duration reauthTtl,
+        @DefaultValue("PT24H") Duration enrollmentWindow,
         @DefaultValue Throttle throttle
 ) {
 
@@ -48,7 +52,7 @@ public record AuthProperties(
     public static AuthProperties defaults() {
         return new AuthProperties(
                 Duration.ofMinutes(15), Duration.ofDays(7), Duration.ofDays(30), Duration.ofSeconds(10),
-                true, Duration.ofMinutes(5),
+                true, Duration.ofMinutes(5), Duration.ofMinutes(5), Duration.ofHours(24),
                 new Throttle(5, Duration.ofMinutes(1), 20, Duration.ofMinutes(5), Duration.ofMinutes(30), Duration.ofHours(1))
         );
     }

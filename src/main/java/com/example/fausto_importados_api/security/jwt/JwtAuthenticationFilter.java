@@ -21,6 +21,9 @@ import java.io.IOException;
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
+    /** Atributo da requisição com o id da sessão (sid) do access token autenticado. */
+    public static final String SESSION_ATTRIBUTE = "fausto.sessionId";
+
     private final JwtService jwtService;
     private final JwtUserDetailsService userDetailsService;
     private final RefreshTokenService refreshTokenService;
@@ -53,6 +56,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     User user = userDetailsService.loadUserById(claims.userId());
 
                     if (user.isEnabled()) {
+                        request.setAttribute(SESSION_ATTRIBUTE, claims.sessionId());
                         UsernamePasswordAuthenticationToken authToken =
                                 new UsernamePasswordAuthenticationToken(
                                         user,

@@ -76,6 +76,9 @@ Access token (JWT, 15 min) + refresh token opaco com **sessão deslizante** e ro
 | GET    | `/auth/me`                | Quem está logado: `{ email, role }`                                          | Bearer                     |
 | POST   | `/auth/logout`            | Revoga a sessão atual e limpa o cookie                                       | Bearer (aceita já vencido) |
 | POST   | `/auth/logout-all`        | Revoga todas as sessões do usuário                                           | Bearer                     |
+| POST   | `/auth/reauth`            | Confirma a identidade com um código 2FA → prova de 5 min para o `X-Reauth`   | Bearer (ADMIN, limitado)   |
+| POST   | `/auth/password`          | Troca a PRÓPRIA senha (senha atual + reautenticação); derruba as outras sessões | Bearer + `X-Reauth`     |
+| POST   | `/auth/mfa/recovery-codes`| Gera 10 códigos de recuperação novos (os antigos deixam de valer)            | Bearer + `X-Reauth`        |
 
 ```json
 // POST /auth/login
@@ -115,6 +118,35 @@ Como funciona:
 - **401 × 403**: sem token (ou token inválido) → 401; autenticado sem permissão (ex.: `USER` numa rota admin) → 403.
 
 > `JWT_EXPIRATION` (24h) não é mais usado. Use `JWT_ACCESS_TTL` (ISO-8601, padrão `PT15M`). Remova a variável antiga do ambiente de produção.
+
+---
+
+### Administradores e auditoria
+
+Cada administrador tem a própria conta (2FA individual). Não há cadastro público: só um admin autenticado cria outro.
+Todas as alterações abaixo exigem **reautenticação recente** (`POST /auth/reauth` → header `X-Reauth`); sem ela a
+resposta é `403 { "code": "reauth_required" }`.
+
+| Método | Endpoint                          | Descrição                                                              | Acesso            |
+| ------ | --------------------------------- | ---------------------------------------------------------------------- | ----------------- |
+| GET    | `/api/user`, `/api/user/{id}`     | Lista/consulta contas (`active`, `mfaEnabled`)                         | ADMIN             |
+| POST   | `/api/user`                       | Cria admin a partir do e-mail; devolve **senha temporária (uma vez)**  | ADMIN + reauth    |
+| PUT    | `/api/user/{id}`                  | Troca o e-mail (a senha NÃO muda por aqui)                             | ADMIN + reauth    |
+| PATCH  | `/api/user/{id}/active`           | `{ "active": false }` desativa e encerra as sessões na hora            | ADMIN + reauth    |
+| POST   | `/api/user/{id}/reset-credentials`| Senha esquecida / aparelho perdido: nova senha temporária e 2FA a refazer | ADMIN + reauth |
+| DELETE | `/api/user/{id}`                  | Exclui a conta (prefira desativar)                                     | ADMIN + reauth    |
+| GET    | `/api/admin/audit`                | Trilha de auditoria (`page`, `size`, `action`, `entityType`)           | ADMIN             |
+
+Regras: ninguém desativa/exclui/redefine a **própria** conta por essas rotas e o **último admin ativo** nunca pode ser
+removido ou desativado (409). A senha de OUTRA pessoa nunca é definida por um admin: o servidor gera uma senha
+temporária de 20 caracteres, mostrada uma única vez, que o novo admin troca ao cadastrar o 2FA em até 24 h
+(depois disso a conta só volta com um novo `reset-credentials`).
+
+**Auditoria** (`audit_log`): quem (usuário), o quê (ação/entidade, com antes/depois em alterações de produto), quando,
+IP e user-agent. Registra login (sucesso, falha, bloqueio), 2FA, reautenticação, troca de senha, gestão de admins,
+criação/alteração/exclusão de produtos, baixa de estoque, pedidos concluídos/cancelados, zerar histórico/vendas/relatório,
+reuso de refresh token e acessos negados (403, com limite por minuto). **Nunca** grava senhas, tokens, códigos ou
+segredos (chaves sensíveis em `details` viram `[redacted]`). Retenção: 1 ano (`security.audit.retention`, ISO-8601).
 
 ---
 

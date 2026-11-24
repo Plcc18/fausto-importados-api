@@ -3,7 +3,7 @@ package com.example.fausto_importados_api.controller;
 import jakarta.servlet.http.HttpServletRequest;
 
 /** Dados do cliente, usados para limitar tentativas de login e gravar a sessão. */
-final class ClientInfo {
+public final class ClientInfo {
 
     private ClientInfo() {
     }
@@ -14,7 +14,7 @@ final class ClientInfo {
      * Atrás do proxy da Vercel (rota /auth), este IP é o da própria Vercel, compartilhado — por isso o
      * controle principal de força bruta é por conta, não por IP.
      */
-    static String ip(HttpServletRequest request) {
+    public static String ip(HttpServletRequest request) {
         String forwarded = request.getHeader("X-Forwarded-For");
         if (forwarded != null && !forwarded.isBlank()) {
             String[] hops = forwarded.split(",");

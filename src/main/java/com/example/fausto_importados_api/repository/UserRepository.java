@@ -13,8 +13,13 @@ import java.util.UUID;
 public interface UserRepository extends JpaRepository<User, UUID> {
     public Optional<User> findByEmail(String email);
 
+    Optional<User> findByEmailIgnoreCase(String email);
+
     boolean existsByRole(Role role);
     boolean existsByEmail(String email);
+    boolean existsByEmailIgnoreCase(String email);
+
+    long countByRoleAndActiveTrue(Role role);
 
     /**
      * Registra o passo TOTP aceito SOMENTE se for mais novo que o último (atômico no banco): duas

@@ -189,9 +189,8 @@ public class ProductService {
     }
 
     public void delete(UUID id) {
-        Product product = findActiveById(id);
+        findActiveById(id); // 404 se não existir (ou já estiver inativo)
         productRepository.deleteById(id);
-        productRepository.save(product);
     }
 
     public Product updatePartial(UUID id, ProductUpdateDTO dto) {

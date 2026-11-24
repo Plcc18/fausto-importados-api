@@ -1,11 +1,8 @@
 package com.example.fausto_importados_api.services;
 
 import com.example.fausto_importados_api.model.User;
-import com.example.fausto_importados_api.model.enums.Role;
 import com.example.fausto_importados_api.repository.UserRepository;
-import com.example.fausto_importados_api.services.exception.DuplicateUserException;
 import com.example.fausto_importados_api.services.exception.UserNotFoundException;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -20,14 +17,9 @@ public class UserService {
     );
 
     private final UserRepository userRepository;
-    private final PasswordEncoder passwordEncoder;
 
-    public UserService(
-            UserRepository userRepository,
-            PasswordEncoder passwordEncoder
-    ) {
+    public UserService(UserRepository userRepository) {
         this.userRepository = userRepository;
-        this.passwordEncoder = passwordEncoder;
     }
 
     // login Spring Security
@@ -36,32 +28,6 @@ public class UserService {
                 .orElseThrow(() ->
                         new UserNotFoundException("Admin Not Found")
                 );
-    }
-
-    // criação do admin — só pode existir um admin no sistema
-    public User createAdmin(User user) {
-
-        if (userRepository.existsByRole(Role.ADMIN)) {
-            throw new DuplicateUserException("Admin already exists");
-        }
-
-        if (userRepository.existsByEmail(user.getEmail())) {
-            throw new DuplicateUserException("Email already registered");
-        }
-
-        User admin = buildAdmin(user);
-        return userRepository.save(admin);
-
-    }
-
-    private User buildAdmin(User input) {
-        User admin = new User();
-        admin.setEmail(input.getEmail());
-        admin.setPassword(passwordEncoder.encode(input.getPassword()));
-        admin.setRole(Role.ADMIN);
-        admin.setActive(true);
-
-        return admin;
     }
 
     public User findById(UUID id) {

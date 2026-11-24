@@ -1,8 +1,13 @@
 package com.example.fausto_importados_api;
 
+import com.example.fausto_importados_api.audit.AuditAction;
+import com.example.fausto_importados_api.audit.AuditService;
+import com.example.fausto_importados_api.audit.Outcome;
+import com.example.fausto_importados_api.model.AuditLog;
 import com.example.fausto_importados_api.model.MfaRecoveryCode;
 import com.example.fausto_importados_api.model.User;
 import com.example.fausto_importados_api.model.enums.Role;
+import com.example.fausto_importados_api.repository.AuditLogRepository;
 import com.example.fausto_importados_api.repository.MfaRecoveryCodeRepository;
 import com.example.fausto_importados_api.repository.UserRepository;
 import com.example.fausto_importados_api.security.throttle.LoginThrottle;
@@ -88,6 +93,8 @@ class PostgresMigrationTest {
     @Autowired UserRepository users;
     @Autowired MfaRecoveryCodeRepository recoveryCodes;
     @Autowired LoginThrottle throttle;
+    @Autowired AuditService audit;
+    @Autowired AuditLogRepository auditRepo;
     @Autowired TransactionTemplate tx; // as queries @Modifying exigem transação (em produção vêm do @Transactional dos serviços)
 
     @Test
@@ -96,7 +103,7 @@ class PostgresMigrationTest {
         List<String> versions = jdbc.queryForList(
                 "select version from flyway_schema_history where success order by installed_rank", String.class);
 
-        assertThat(versions).containsExactly("1", "2", "3", "4", "5");
+        assertThat(versions).containsExactly("1", "2", "3", "4", "5", "6");
     }
 
     @Test
@@ -126,6 +133,23 @@ class PostgresMigrationTest {
         assertThat(read.getTotpLastStep()).isEqualTo(1234567L);
         assertThat(read.isMustChangePassword()).isTrue();
         assertThat(read.getEnrollmentExpiresAt()).isEqualTo(Instant.parse("2026-03-02T00:00:00Z"));
+    }
+
+    @Test
+    void auditRowsAreWrittenAndReadBackWithRedactedDetails() {
+        String marker = "pg-audit-" + UUID.randomUUID();
+
+        audit.recordSuccess(AuditAction.PRODUCT_UPDATED, "PRODUCT", marker,
+                java.util.Map.of("changes", java.util.Map.of("price", java.util.Map.of("from", "10", "to", "9")),
+                        "password", "nao-deve-aparecer"));
+
+        AuditLog row = auditRepo.findByEntityTypeOrderByOccurredAtDesc("PRODUCT",
+                        org.springframework.data.domain.PageRequest.of(0, 50)).stream()
+                .filter(r -> marker.equals(r.getEntityId())).findFirst().orElseThrow();
+        assertThat(row.getAction()).isEqualTo("PRODUCT_UPDATED");
+        assertThat(row.getOutcome()).isEqualTo(Outcome.SUCCESS);
+        assertThat(row.getOccurredAt()).isNotNull();
+        assertThat(row.getDetails()).contains("\"price\"").contains("[redacted]").doesNotContain("nao-deve-aparecer");
     }
 
     @Test

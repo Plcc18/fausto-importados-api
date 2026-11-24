@@ -1,5 +1,7 @@
 package com.example.fausto_importados_api.security.refresh;
 
+import com.example.fausto_importados_api.audit.AuditAction;
+import com.example.fausto_importados_api.audit.AuditService;
 import com.example.fausto_importados_api.config.AuthProperties;
 import com.example.fausto_importados_api.model.RefreshToken;
 import com.example.fausto_importados_api.model.User;
@@ -16,6 +18,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -39,17 +42,20 @@ public class RefreshTokenService {
     private final RefreshTokenRepository tokens;
     private final UserRepository users;
     private final AuthProperties props;
+    private final AuditService audit;
     private final Clock clock;
 
     public RefreshTokenService(
             RefreshTokenRepository tokens,
             UserRepository users,
             AuthProperties props,
+            AuditService audit,
             Clock clock
     ) {
         this.tokens = tokens;
         this.users = users;
         this.props = props;
+        this.audit = audit;
         this.clock = clock;
     }
 
@@ -150,6 +156,8 @@ public class RefreshTokenService {
 
         // Fora da janela: assume roubo e derruba a sessão inteira.
         tokens.revokeFamily(old.getFamilyId(), now);
+        audit.recordDeniedAs(users.findById(old.getUserId()).orElse(null), AuditAction.REFRESH_REUSE_DETECTED,
+                Map.of("sessionRevoked", true));
         return new RefreshResult.Rejected();
     }
 
@@ -162,6 +170,12 @@ public class RefreshTokenService {
     @Transactional
     public void revokeAllSessions(UUID userId) {
         tokens.revokeAllByUser(userId, clock.instant());
+    }
+
+    /** Troca de senha: derruba as OUTRAS sessões (outros aparelhos), mantendo a atual. */
+    @Transactional
+    public void revokeOtherSessions(UUID userId, UUID currentSessionId) {
+        tokens.revokeAllByUserExcept(userId, currentSessionId, clock.instant());
     }
 
     public boolean isSessionActive(UUID sessionId) {

@@ -1,5 +1,8 @@
 package com.example.fausto_importados_api.controller;
 
+import com.example.fausto_importados_api.audit.AuditAction;
+import com.example.fausto_importados_api.audit.AuditDiff;
+import com.example.fausto_importados_api.audit.AuditService;
 import com.example.fausto_importados_api.dto.auth.ProductRequestDTO;
 import com.example.fausto_importados_api.dto.auth.ProductResponseDTO;
 import com.example.fausto_importados_api.dto.auth.ProductUpdateDTO;
@@ -8,6 +11,7 @@ import com.example.fausto_importados_api.model.Product;
 import com.example.fausto_importados_api.model.enums.Category;
 import com.example.fausto_importados_api.services.ProductService;
 import com.example.fausto_importados_api.services.exception.InvalidProductException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Valid;
@@ -24,7 +28,9 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -38,6 +44,9 @@ public class ProductController {
 
     @Autowired
     private ProductMapper productMapper;
+
+    @Autowired
+    private AuditService audit;
 
     @Autowired
     private Validator validator;
@@ -97,7 +106,8 @@ public class ProductController {
     public ResponseEntity<ApiResponse> postProduct(
             @Valid @RequestBody ProductRequestDTO dto
     ) {
-        productService.save(productMapper.toEntity(dto));
+        Product saved = productService.save(productMapper.toEntity(dto));
+        audit.recordSuccess(AuditAction.PRODUCT_CREATED, "PRODUCT", saved.getId(), AuditDiff.created(saved));
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(new ApiResponse(Instant.now().toString(), "Product created successfully"));
     }
@@ -111,6 +121,9 @@ public class ProductController {
             @RequestBody List<StockDecreaseItem> items
     ) {
         items.forEach(item -> productService.decreaseStock(item.productId(), item.quantity()));
+        audit.recordSuccess(AuditAction.STOCK_DECREASED, "PRODUCT", null, Map.of("items", items.stream()
+                .map(item -> Map.of("productId", String.valueOf(item.productId()), "quantity", item.quantity()))
+                .toList()));
         return ResponseEntity.ok(
                 new ApiResponse(Instant.now().toString(), "Stock updated successfully")
         );
@@ -139,6 +152,7 @@ public class ProductController {
                 throw new InvalidProductException(message);
             }
 
+            Map<String, Object> before = AuditDiff.product(existing);
             productMapper.updateEntityFromRequest(existing, dto);
 
             if (file != null && !file.isEmpty()) {
@@ -147,6 +161,8 @@ public class ProductController {
             }
 
             productService.update(existing);
+            audit.recordSuccess(AuditAction.PRODUCT_UPDATED, "PRODUCT", id,
+                    Map.of("changes", AuditDiff.diff(before, AuditDiff.product(existing))));
 
             return ResponseEntity.ok(
                     new ApiResponse(Instant.now().toString(), "Product updated successfully")
@@ -168,6 +184,12 @@ public class ProductController {
             @Valid @RequestBody ProductUpdateDTO dto
     ) {
         Product updated = productService.updatePartial(id, dto);
+        Map<String, Object> requested = new LinkedHashMap<>();
+        objectMapper.convertValue(dto, new TypeReference<Map<String, Object>>() {})
+                .forEach((field, value) -> {
+                    if (value != null) requested.put(field, value);
+                });
+        audit.recordSuccess(AuditAction.PRODUCT_UPDATED, "PRODUCT", id, Map.of("requested", requested));
         return ResponseEntity.ok(productMapper.toResponseDTO(updated));
     }
 
@@ -177,7 +199,9 @@ public class ProductController {
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse> deleteProduct(@PathVariable UUID id) {
+        Product product = productService.findActiveById(id);
         productService.delete(id);
+        audit.recordSuccess(AuditAction.PRODUCT_DELETED, "PRODUCT", id, AuditDiff.created(product));
         return ResponseEntity.ok(
                 new ApiResponse(Instant.now().toString(), "Product deleted successfully")
         );

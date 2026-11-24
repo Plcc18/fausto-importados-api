@@ -2,6 +2,7 @@ package com.example.fausto_importados_api.controller;
 
 import com.example.fausto_importados_api.dto.auth.ErrorResponseDTO;
 import com.example.fausto_importados_api.security.mfa.MfaException;
+import com.example.fausto_importados_api.services.exception.AccountConflictException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.AuthenticationException;
@@ -35,6 +36,13 @@ public class AuthExceptionHandler {
             case WEAK_PASSWORD -> HttpStatus.BAD_REQUEST;
         };
         return ResponseEntity.status(status)
+                .body(new ErrorResponseDTO(Instant.now().toString(), ex.getMessage()));
+    }
+
+    // Conflito de estado na gestão de contas (e-mail em uso, último admin, ação sobre si mesmo)
+    @ExceptionHandler(AccountConflictException.class)
+    public ResponseEntity<ErrorResponseDTO> handleConflict(AccountConflictException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(new ErrorResponseDTO(Instant.now().toString(), ex.getMessage()));
     }
 }

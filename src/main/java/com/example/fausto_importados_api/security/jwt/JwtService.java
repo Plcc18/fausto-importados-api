@@ -28,10 +28,12 @@ public class JwtService {
 
     static final String PURPOSE = "purpose";
     static final String PURPOSE_MFA_CHALLENGE = "mfa-challenge";
+    static final String PURPOSE_REAUTH = "reauth";
 
     private final SecretKey signingKey;
     private final Duration accessTtl;
     private final Duration mfaChallengeTtl;
+    private final Duration reauthTtl;
     private final Clock clock;
 
     public JwtService(
@@ -42,7 +44,12 @@ public class JwtService {
         this.signingKey = Keys.hmacShaKeyFor(Decoders.BASE64.decode(jwtSecret));
         this.accessTtl = properties.accessTtl();
         this.mfaChallengeTtl = properties.mfaChallengeTtl();
+        this.reauthTtl = properties.reauthTtl();
         this.clock = clock;
+    }
+
+    /** Reautenticação válida: de quem e para qual sessão. */
+    public record ReauthClaims(UUID userId, UUID sessionId) {
     }
 
     /** Dados que o filtro precisa de um access token já verificado. */
@@ -121,6 +128,44 @@ public class JwtService {
                 return Optional.empty();
             }
             return Optional.of(UUID.fromString(claims.getSubject()));
+        } catch (JwtException | IllegalArgumentException e) {
+            return Optional.empty();
+        }
+    }
+
+    public Duration reauthTtl() {
+        return reauthTtl;
+    }
+
+    /**
+     * Prova de que o administrador acabou de confirmar a identidade com um código 2FA. Presa ao usuário E à sessão
+     * ({@code sid}): não serve em outra sessão nem para outra pessoa. Não é um access token (tem {@code purpose}).
+     */
+    public String generateReauthToken(User user, UUID sessionId) {
+        Date now = Date.from(clock.instant());
+        Date expiration = Date.from(clock.instant().plus(reauthTtl));
+        return Jwts.builder()
+                .subject(user.getId().toString())
+                .claim("sid", sessionId.toString())
+                .claim(PURPOSE, PURPOSE_REAUTH)
+                .issuedAt(now)
+                .expiration(expiration)
+                .signWith(signingKey)
+                .compact();
+    }
+
+    public Optional<ReauthClaims> parseReauthToken(String token) {
+        if (token == null || token.isBlank()) {
+            return Optional.empty();
+        }
+        try {
+            Claims claims = parser().parseSignedClaims(token).getPayload();
+            if (!PURPOSE_REAUTH.equals(claims.get(PURPOSE, String.class)) || claims.get("sid") == null) {
+                return Optional.empty();
+            }
+            return Optional.of(new ReauthClaims(
+                    UUID.fromString(claims.getSubject()),
+                    UUID.fromString(claims.get("sid", String.class))));
         } catch (JwtException | IllegalArgumentException e) {
             return Optional.empty();
         }
