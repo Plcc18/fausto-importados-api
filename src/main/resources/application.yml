@@ -17,7 +17,8 @@ spring:
   jpa:
     hibernate:
       ddl-auto: validate
-    show-sql: true
+    # SQL no log só no profile dev (application-dev.yml); o padrão não despeja consultas nos logs de produção
+    show-sql: false
 
   # Flyway
   flyway:
@@ -27,10 +28,10 @@ spring:
 server:
   port: "${PORT:8080}"
 
-# Spring Security (logs)
+# Logs: DEBUG do Spring Security só no profile dev (application-dev.yml)
 logging:
   level:
-    org.springframework.security: DEBUG
+    org.springframework.security: INFO
 
 # JWT
 security:

@@ -1,0 +1,78 @@
+name: Database backup
+
+# Backup diário e cifrado do PostgreSQL de produção. O arquivo vira um "artifact" do GitHub (30 dias).
+# Só a chave PÚBLICA GnuPG fica aqui; a privada fica offline com quem restaura.
+# Configuração e restauração: docs/OPERATIONS.md ("Backup e restauração").
+#
+# Secrets do repositório:
+#   BACKUP_DATABASE_URL     URL EXTERNA do banco no Render (postgres://usuario:senha@host/banco?sslmode=require)
+#   BACKUP_GPG_PUBLIC_KEY   chave pública GnuPG em texto (gpg --armor --export <fingerprint>)
+
+on:
+  schedule:
+    - cron: "17 5 * * *" # 05:17 UTC todos os dias
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  # O pg_dump precisa ser da MESMA versão do servidor ou mais nova. Ajuste se o seu banco for mais novo que isto.
+  PG_MAJOR: "17"
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      # banco descartável onde o dump é restaurado para provar que ele funciona
+      verify-db:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: verify
+          POSTGRES_DB: verify
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar o cliente PostgreSQL ${{ env.PG_MAJOR }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl ca-certificates gnupg lsb-release
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y "postgresql-client-${PG_MAJOR}"
+          pg_dump --version
+
+      - name: Importar a chave pública de cifra
+        env:
+          BACKUP_GPG_PUBLIC_KEY: ${{ secrets.BACKUP_GPG_PUBLIC_KEY }}
+        run: |
+          test -n "$BACKUP_GPG_PUBLIC_KEY" || { echo "::error::secret BACKUP_GPG_PUBLIC_KEY não configurado"; exit 1; }
+          echo "$BACKUP_GPG_PUBLIC_KEY" | gpg --batch --import
+          fingerprint="$(gpg --list-keys --with-colons | awk -F: '/^fpr/ {print $10; exit}')"
+          echo "BACKUP_GPG_RECIPIENT=$fingerprint" >> "$GITHUB_ENV"
+
+      - name: Dump, verificação por restauração e cifra
+        env:
+          DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+          VERIFY_DATABASE_URL: postgres://postgres:verify@localhost:5432/verify
+        run: |
+          test -n "$DATABASE_URL" || { echo "::error::secret BACKUP_DATABASE_URL não configurado"; exit 1; }
+          bash scripts/db-backup.sh "fausto-db-$(date -u +%Y%m%dT%H%M%SZ).dump.gpg"
+
+      - name: Guardar o backup cifrado
+        uses: actions/upload-artifact@v4
+        with:
+          name: fausto-db-backup
+          path: "*.dump.gpg"
+          retention-days: 30
+          if-no-files-found: error

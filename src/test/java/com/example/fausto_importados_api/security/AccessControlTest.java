@@ -152,6 +152,18 @@ class AccessControlTest {
     }
 
     @Test
+    void apiResponsesCarrySecurityHeaders_andNeverCacheAuthenticatedData() throws Exception {
+        MvcResult ok = call("GET", "/api/user", adminToken);
+        MvcResult denied = call("GET", "/api/user", null);
+
+        for (MvcResult res : new MvcResult[]{ok, denied}) {
+            assertThat(res.getResponse().getHeader("X-Content-Type-Options")).isEqualTo("nosniff");
+            assertThat(res.getResponse().getHeader("X-Frame-Options")).isEqualTo("DENY");
+            assertThat(res.getResponse().getHeader("Cache-Control")).contains("no-store");
+        }
+    }
+
+    @Test
     void corsAllowsTheConfiguredFrontendOnly() throws Exception {
         MvcResult allowed = mvc.perform(options("/api/product")
                 .header("Origin", "http://localhost:5173")

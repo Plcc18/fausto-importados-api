@@ -192,6 +192,15 @@ Fluxo:
 
 ---
 
+## Operação (administradores, 2FA, auditoria e backup)
+
+O passo a passo para criar e desativar administradores, recuperar o 2FA, consultar a auditoria e fazer/restaurar
+backup está em **[docs/OPERATIONS.md](docs/OPERATIONS.md)**. Há um backup diário cifrado
+([.github/workflows/db-backup.yml](.github/workflows/db-backup.yml)) com restauração testada
+([scripts/db-restore.sh](scripts/db-restore.sh)).
+
+---
+
 ## Como Executar
 
 ### Pré-requisitos
