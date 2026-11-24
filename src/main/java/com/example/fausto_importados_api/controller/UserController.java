@@ -5,6 +5,7 @@ import com.example.fausto_importados_api.dto.UserResponseDTO;
 import com.example.fausto_importados_api.dto.UserUpdateDTO;
 import com.example.fausto_importados_api.mapper.UserMapper;
 import com.example.fausto_importados_api.model.User;
+import com.example.fausto_importados_api.security.refresh.RefreshTokenService;
 import com.example.fausto_importados_api.services.UserService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,6 +31,9 @@ public class UserController {
 
     @Autowired
     private UserMapper userMapper;
+
+    @Autowired
+    private RefreshTokenService refreshTokenService;
 
     // DTO de resposta padrão
     public record ApiResponse(String timeStamp, String message) {}
@@ -96,11 +100,17 @@ public class UserController {
 
         userMapper.updateEntityFromRequest(existing, dto);
 
-        if (dto.password() != null && !dto.password().isBlank()) {
+        boolean passwordChanged = dto.password() != null && !dto.password().isBlank();
+        if (passwordChanged) {
             existing.setPassword(passwordEncoder.encode(existing.getPassword()));
         }
 
         userService.save(existing);
+
+        // Troca de senha derruba todas as sessões do usuário (todos os dispositivos precisam logar de novo).
+        if (passwordChanged) {
+            refreshTokenService.revokeAllSessions(existing.getId());
+        }
 
         return ResponseEntity.ok(
                 new ApiResponse(

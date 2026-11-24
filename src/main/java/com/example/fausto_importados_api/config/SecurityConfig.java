@@ -3,7 +3,6 @@ package com.example.fausto_importados_api.config;
 import com.example.fausto_importados_api.security.jwt.JwtAuthenticationEntryPoint;
 import com.example.fausto_importados_api.security.jwt.JwtAuthenticationFilter;
 import com.example.fausto_importados_api.security.jwt.JwtUserDetailsService;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -53,7 +52,10 @@ public class SecurityConfig {
                 )
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/error").permitAll()
-                        .requestMatchers("/auth/**").permitAll()
+                        // Rotas de auth públicas: a credencial é a senha (login), o cookie de refresh
+                        // (refresh, protegido por Origin + header customizado) ou o access token (logout)
+                        .requestMatchers("/auth/login", "/auth/refresh", "/auth/logout").permitAll()
+                        .requestMatchers("/auth/me", "/auth/logout-all").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/product/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/image/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/user").hasRole("ADMIN")
@@ -87,17 +89,13 @@ public class SecurityConfig {
         return new BCryptPasswordEncoder();
     }
 
-    @Value("${FRONTEND_URL:http://localhost:5173}")
-    private String frontendUrl;
-
     @Bean
-    public CorsConfigurationSource corsConfigurationSource() {
+    public CorsConfigurationSource corsConfigurationSource(AllowedOrigins allowedOrigins) {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.addAllowedMethod("*");
         configuration.addAllowedHeader("*");
         configuration.setAllowCredentials(true);
-        configuration.addAllowedOrigin(frontendUrl);
-        configuration.addAllowedOrigin("http://localhost:5173");
+        allowedOrigins.all().forEach(configuration::addAllowedOrigin);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
         return source;

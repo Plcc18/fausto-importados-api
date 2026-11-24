@@ -25,7 +25,11 @@ logging:
 security:
   jwt:
     secret: "${JWT_SECRET}"
-    expiration: "${JWT_EXPIRATION:86400000}"
+  auth:
+    access-ttl: "${JWT_ACCESS_TTL:PT15M}"
+    refresh-inactivity: "${REFRESH_INACTIVITY:P7D}"
+    refresh-absolute: "${REFRESH_ABSOLUTE:P30D}"
+    refresh-grace: "${REFRESH_GRACE:PT10S}"
 
 # Cloudinary
 cloudinary:
@@ -46,4 +50,5 @@ ADMIN_PASSWORD: "${ADMIN_PASSWORD}"
 app:
   cookie:
     secure: false
-    same-site: "Lax"
+    # localhost:5173 e localhost:8080 são o mesmo "site" — Strict funciona em dev
+    same-site: "Strict"

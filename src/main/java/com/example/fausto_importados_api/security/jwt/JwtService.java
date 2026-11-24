@@ -1,86 +1,115 @@
 package com.example.fausto_importados_api.security.jwt;
 
+import com.example.fausto_importados_api.config.AuthProperties;
+import com.example.fausto_importados_api.model.User;
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
+import io.jsonwebtoken.JwtParser;
 import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.impl.lang.Function;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.security.core.GrantedAuthority;
-import org.springframework.security.core.userdetails.User;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
 
 import javax.crypto.SecretKey;
+import java.time.Clock;
+import java.time.Duration;
 import java.util.Date;
+import java.util.Optional;
+import java.util.UUID;
 
+/**
+ * Access token: JWT de vida curta, assinado com o segredo de {@code JWT_SECRET}.
+ * Payload mínimo: {@code sub} (id do usuário), {@code role} e {@code sid} (id da sessão).
+ */
 @Service
 public class JwtService {
 
     private final SecretKey signingKey;
-    private final long jwtExpiration;
+    private final Duration accessTtl;
+    private final Clock clock;
 
     public JwtService(
             @Value("${security.jwt.secret}") String jwtSecret,
-            @Value("${security.jwt.expiration}") long jwtExpiration
+            AuthProperties properties,
+            Clock clock
     ) {
         this.signingKey = Keys.hmacShaKeyFor(Decoders.BASE64.decode(jwtSecret));
-        this.jwtExpiration = jwtExpiration;
+        this.accessTtl = properties.accessTtl();
+        this.clock = clock;
     }
 
-    public String generateToken(UserDetails userDetails) {
+    /** Dados que o filtro precisa de um access token já verificado. */
+    public record AccessClaims(UUID userId, String role, UUID sessionId) {
+    }
+
+    public Duration accessTtl() {
+        return accessTtl;
+    }
+
+    public String generateAccessToken(User user, UUID sessionId) {
+        Date now = Date.from(clock.instant());
+        Date expiration = Date.from(clock.instant().plus(accessTtl));
         return Jwts.builder()
-                .subject(userDetails.getUsername())
-                .claim("roles", userDetails.getAuthorities()
-                        .stream()
-                        .map(GrantedAuthority::getAuthority)
-                        .toList())
-                .issuedAt(new Date())
-                .expiration(new Date(System.currentTimeMillis() + jwtExpiration))
+                .subject(user.getId().toString())
+                .claim("role", user.getRole().name())
+                .claim("sid", sessionId.toString())
+                .issuedAt(now)
+                .expiration(expiration)
                 .signWith(signingKey)
                 .compact();
     }
 
-    public String getSubject(String token) {
-        return extractClaim(token, Claims::getSubject);
+    /**
+     * Valida assinatura e expiração.
+     *
+     * @throws JwtException             token inválido, adulterado ou expirado
+     * @throws IllegalArgumentException claims malformadas
+     */
+    public AccessClaims parse(String token) {
+        return toAccessClaims(parser().parseSignedClaims(token).getPayload());
     }
 
-    public boolean isTokenExpired(String token) {
-        return extractClaim(token, Claims::getExpiration)
-                .before(new Date());
+    /**
+     * Valida a assinatura mas aceita token já expirado. Usado só no logout: quem tem um token com
+     * assinatura legítima pode encerrar a PRÓPRIA sessão, mesmo que o access token tenha vencido.
+     */
+    public Optional<AccessClaims> parseIgnoringExpiry(String token) {
+        try {
+            return Optional.of(parse(token));
+        } catch (ExpiredJwtException e) {
+            try {
+                return Optional.of(toAccessClaims(e.getClaims()));
+            } catch (RuntimeException ignored) {
+                return Optional.empty();
+            }
+        } catch (JwtException | IllegalArgumentException e) {
+            return Optional.empty();
+        }
     }
 
     public boolean isTokenValid(String token) {
         try {
-            Claims claims = getAllClaims(token);
-            return claims.getExpiration().after(new Date());
+            parse(token);
+            return true;
         } catch (JwtException | IllegalArgumentException e) {
             return false;
         }
     }
 
-    public boolean isTokenValid(String token, UserDetails userDetails) {
-        String username = extractUsername(token);
-        return username.equals(userDetails.getUsername())
-                && isTokenValid(token);
-    }
-
-
-    public <T> T extractClaim(String token, Function<Claims, T> resolver) {
-        return resolver.apply(getAllClaims(token));
-    }
-
-    private Claims getAllClaims(String token) {
+    private JwtParser parser() {
         return Jwts.parser()
                 .verifyWith(signingKey)
-                .build()
-                .parseSignedClaims(token)
-                .getPayload();
+                .clock(() -> Date.from(clock.instant()))
+                .build();
     }
 
-    public String extractUsername(String token) {
-        return getSubject(token);
+    private AccessClaims toAccessClaims(Claims claims) {
+        return new AccessClaims(
+                UUID.fromString(claims.getSubject()),
+                claims.get("role", String.class),
+                UUID.fromString(claims.get("sid", String.class))
+        );
     }
 }
-

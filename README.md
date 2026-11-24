@@ -64,20 +64,34 @@ payments (id, order_id, amount, payment_method, status)
 
 ### Autenticação
 
-| Método | Endpoint          | Descrição     | Acesso  |
-| ------ | ----------------- | ------------- | ------- |
-| POST   | `/api/auth/login` | Login com JWT | Público |
+Access token (JWT, 15 min) + refresh token opaco com **sessão deslizante** e rotação.
 
-#### Exemplo de Login
+| Método | Endpoint            | Descrição                                                        | Acesso                      |
+| ------ | ------------------- | ---------------------------------------------------------------- | --------------------------- |
+| POST   | `/auth/login`       | Abre a sessão: access token no corpo, refresh token em cookie    | Público                     |
+| POST   | `/auth/refresh`     | Troca o refresh token por um novo e devolve um novo access token | Cookie + `Origin` + header  |
+| GET    | `/auth/me`          | Valida a sessão atual                                            | Bearer                      |
+| POST   | `/auth/logout`      | Revoga a sessão atual e limpa o cookie                           | Bearer (aceita já vencido)  |
+| POST   | `/auth/logout-all`  | Revoga todas as sessões do usuário                               | Bearer                      |
 
 ```json
-{
-  "email": "admin@fausto.com",
-  "password": "123456"
-}
+// POST /auth/login
+{ "email": "admin@fausto.com", "password": "123456" }
+// → 200 { "accessToken": "<jwt>", "expiresIn": 900 }  +  Set-Cookie: refresh_token=...
 ```
 
-→ Retorna: `JWT Token`
+Como funciona:
+
+- **Access token**: JWT assinado com `JWT_SECRET`, vida de 15 min, payload `sub` (id), `role` e `sid` (id da sessão). Enviado em `Authorization: Bearer`; o front o guarda só em memória.
+- **Refresh token**: 256 bits aleatórios, no cookie `refresh_token` (`HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/auth/refresh`). No banco fica **só o hash SHA-256** (tabela `refresh_tokens`).
+- **Sessão deslizante**: cada refresh zera o prazo de inatividade (`REFRESH_INACTIVITY`, 7 dias) mas nunca passa do limite absoluto (`REFRESH_ABSOLUTE`, 30 dias).
+- **Rotação e reuso**: cada refresh gera um token novo e invalida o anterior, com `SELECT ... FOR UPDATE`. Reapresentar um token já trocado revoga a família inteira, exceto dentro de `REFRESH_GRACE` (10 s), janela para requisições concorrentes legítimas (várias abas): nela só se devolve um novo access token, sem rotacionar de novo.
+- **CSRF no refresh**: `SameSite=Strict` + `Origin` na lista de `FRONTEND_URL` + header `X-Requested-With: fausto-web`.
+- **Revogação**: logout, "sair de todos" e troca de senha (`PUT /api/user/{id}` com senha) revogam sessões; vale imediatamente porque o filtro confere o `sid` a cada request.
+- **Limpeza**: `RefreshTokenCleanupJob` apaga tokens vencidos diariamente (cron em `security.auth.cleanup-cron`).
+- Erros de login/refresh são genéricos e não revelam a causa.
+
+> `JWT_EXPIRATION` (24h) não é mais usado. Use `JWT_ACCESS_TTL` (ISO-8601, padrão `PT15M`). Remova a variável antiga do ambiente de produção.
 
 ---
 

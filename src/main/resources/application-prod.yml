@@ -28,7 +28,11 @@ server:
 security:
   jwt:
     secret: "${JWT_SECRET}"
-    expiration: "${JWT_EXPIRATION:86400000}"
+  auth:
+    access-ttl: "${JWT_ACCESS_TTL:PT15M}"
+    refresh-inactivity: "${REFRESH_INACTIVITY:P7D}"
+    refresh-absolute: "${REFRESH_ABSOLUTE:P30D}"
+    refresh-grace: "${REFRESH_GRACE:PT10S}"
 
 # Cloudinary
 cloudinary:
@@ -66,4 +70,6 @@ management:
 app:
   cookie:
     secure: true
-    same-site: "None"
+    # Strict exige que o browser veja o /auth como same-origin com o front: na Vercel isso é feito
+    # pelo rewrite de /auth/* (vercel.json), que repassa o cookie para o domínio do próprio front.
+    same-site: "Strict"

@@ -2,5 +2,8 @@ package com.example.fausto_importados_api.dto.auth;
 
 import jakarta.validation.constraints.NotBlank;
 
-public record JwtRequestDTO(String email, String password) {
+public record JwtRequestDTO(
+        @NotBlank String email,
+        @NotBlank String password
+) {
 }

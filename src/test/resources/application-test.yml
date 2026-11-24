@@ -20,7 +20,12 @@ spring:
 security:
   jwt:
     secret: "uO4esMFBh12md6KkXNSa36cP7OoVIiqAhIoI3dpxY5E="
-    expiration: 86400000
+  # Prazos de produção (os testes avançam o tempo com um Clock controlável)
+  auth:
+    access-ttl: PT15M
+    refresh-inactivity: P7D
+    refresh-absolute: P30D
+    refresh-grace: PT10S
 
 # Cloudinary (dummy — nenhum teste faz upload real)
 cloudinary:

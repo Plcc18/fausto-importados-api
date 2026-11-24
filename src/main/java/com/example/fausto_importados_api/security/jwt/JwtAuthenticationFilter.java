@@ -1,29 +1,38 @@
 package com.example.fausto_importados_api.security.jwt;
 
+import com.example.fausto_importados_api.model.User;
+import com.example.fausto_importados_api.security.refresh.RefreshTokenService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
-import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.Arrays;
 
+/**
+ * Autentica pelo access token enviado em {@code Authorization: Bearer}. O token não vem mais em cookie,
+ * o que também elimina o vetor de CSRF nas demais rotas da API.
+ */
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
     private final JwtUserDetailsService userDetailsService;
+    private final RefreshTokenService refreshTokenService;
 
-    public JwtAuthenticationFilter(JwtService jwtService, JwtUserDetailsService userDetailsService) {
+    public JwtAuthenticationFilter(
+            JwtService jwtService,
+            JwtUserDetailsService userDetailsService,
+            RefreshTokenService refreshTokenService
+    ) {
         this.jwtService = jwtService;
         this.userDetailsService = userDetailsService;
+        this.refreshTokenService = refreshTokenService;
     }
 
     @Override
@@ -33,29 +42,22 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             FilterChain filterChain
     ) throws ServletException, IOException {
 
-        String token = extractTokenFromCookie(request);
-
-        // Fallback: tenta pegar do header Authorization se não veio no cookie
-        if (token == null) {
-            String authHeader = request.getHeader("Authorization");
-            if (authHeader != null && authHeader.startsWith("Bearer ")) {
-                token = authHeader.substring(7);
-            }
-        }
+        String token = bearerToken(request);
 
         if (token != null && SecurityContextHolder.getContext().getAuthentication() == null) {
             try {
-                String username = jwtService.extractUsername(token);
+                JwtService.AccessClaims claims = jwtService.parse(token);
 
-                if (username != null) {
-                    UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+                // Logout / troca de senha / reuso detectado valem imediatamente, sem esperar o access token expirar.
+                if (refreshTokenService.isSessionActive(claims.sessionId())) {
+                    User user = userDetailsService.loadUserById(claims.userId());
 
-                    if (jwtService.isTokenValid(token, userDetails)) {
+                    if (user.isEnabled()) {
                         UsernamePasswordAuthenticationToken authToken =
                                 new UsernamePasswordAuthenticationToken(
-                                        userDetails,
+                                        user,
                                         null,
-                                        userDetails.getAuthorities()
+                                        user.getAuthorities()
                                 );
                         authToken.setDetails(
                                 new WebAuthenticationDetailsSource().buildDetails(request)
@@ -64,20 +66,19 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     }
                 }
             } catch (Exception e) {
-                // Token inválido ou expirado — segue sem autenticar
+                // Token inválido ou expirado — segue sem autenticar (o entry point responde 401)
             }
         }
 
         filterChain.doFilter(request, response);
     }
 
-    private String extractTokenFromCookie(HttpServletRequest request) {
-        if (request.getCookies() == null) return null;
-
-        return Arrays.stream(request.getCookies())
-                .filter(cookie -> "token".equals(cookie.getName()))
-                .map(Cookie::getValue)
-                .findFirst()
-                .orElse(null);
+    public static String bearerToken(HttpServletRequest request) {
+        String header = request.getHeader("Authorization");
+        if (header != null && header.startsWith("Bearer ")) {
+            String token = header.substring(7).trim();
+            return token.isEmpty() ? null : token;
+        }
+        return null;
     }
 }

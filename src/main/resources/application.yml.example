@@ -9,7 +9,11 @@
 #   DB_USERNAME
 #   DB_PASSWORD
 #   JWT_SECRET           - chave em Base64 com pelo menos 256 bits (ex: openssl rand -base64 32)
-#   JWT_EXPIRATION        - opcional, em ms (default: 86400000 = 24h)
+#   JWT_ACCESS_TTL        - opcional, vida do access token (default: PT15M). JWT_EXPIRATION não é mais usado.
+#   REFRESH_INACTIVITY    - opcional, expiração por inatividade do refresh token (default: P7D)
+#   REFRESH_ABSOLUTE      - opcional, limite absoluto da sessão (default: P30D)
+#   REFRESH_GRACE         - opcional, tolerância a refresh concorrente (default: PT10S)
+#   FRONTEND_URL          - origem(ns) do front, separadas por vírgula (CORS + verificação de Origin no refresh)
 #   CLOUDINARY_NAME
 #   CLOUDINARY_KEY
 #   CLOUDINARY_SECRET
@@ -18,8 +22,8 @@
 #   PORT                  - opcional (default: 8080)
 #
 # Perfis disponíveis (spring.profiles.active=dev|prod):
-#   dev  - logs verbosos de segurança, cookies com secure=false/same-site=Lax (HTTP local)
-#   prod - logs reduzidos, cookies com secure=true/same-site=None (HTTPS)
+#   dev  - logs verbosos de segurança, cookies com secure=false/same-site=Strict (HTTP local)
+#   prod - logs reduzidos, cookies com secure=true/same-site=Strict (HTTPS)
 
 spring:
   application:
@@ -49,7 +53,11 @@ logging:
 security:
   jwt:
     secret: "${JWT_SECRET}"
-    expiration: "${JWT_EXPIRATION:86400000}"
+  auth:
+    access-ttl: "${JWT_ACCESS_TTL:PT15M}"
+    refresh-inactivity: "${REFRESH_INACTIVITY:P7D}"
+    refresh-absolute: "${REFRESH_ABSOLUTE:P30D}"
+    refresh-grace: "${REFRESH_GRACE:PT10S}"
 
 cloudinary:
   cloud_name: "${CLOUDINARY_NAME}"
