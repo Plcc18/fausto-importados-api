@@ -111,8 +111,7 @@ Como funciona:
 - **Força bruta**: bloqueio temporário progressivo **por conta** (5 falhas → 1 min, dobrando até 30 min) e por IP
   (20 falhas → 5 min...). Senha errada e código 2FA errado somam no mesmo contador, e e-mails inexistentes contam
   igual (o bloqueio não revela se a conta existe). Os contadores ficam no PostgreSQL (`auth_throttle`).
-  O IP é o **último** item de `X-Forwarded-For` (o anterior pode ser forjado); atrás do proxy da Vercel esse IP é
-  o da própria Vercel, por isso o controle principal é por conta.
+  O IP do cliente vem de `X-Forwarded-For` contando `TRUSTED_PROXY_HOPS` itens a partir do fim (ver **Rate limiting**).
 - **Primeiro admin**: criado no startup só se não existir nenhum, a partir de `ADMIN_EMAIL`/`ADMIN_PASSWORD`;
   o 2FA é cadastrado no primeiro login e as duas variáveis podem sair do ambiente depois.
 - **401 × 403**: sem token (ou token inválido) → 401; autenticado sem permissão (ex.: `USER` numa rota admin) → 403.
@@ -120,6 +119,46 @@ Como funciona:
 > `JWT_EXPIRATION` (24h) não é mais usado. Use `JWT_ACCESS_TTL` (ISO-8601, padrão `PT15M`). Remova a variável antiga do ambiente de produção.
 
 ---
+
+### Rate limiting
+
+Algoritmo **token bucket**: o balde começa cheio (o máximo de uma vez) e recupera `máximo/janela` fichas por unidade de
+tempo; uma janela inteira sem uso o enche de novo. A checagem e o gasto da ficha são atômicos (script Lua no Redis;
+`SELECT ... FOR UPDATE` no Postgres), então requisições simultâneas não furam o limite.
+
+| Regra (variável) | Padrão | Chave |
+|---|---|---|
+| `RATE_LIMIT_LOGIN_IP` | `5/15m` | IP, em `/auth/login` e `/auth/login/mfa` |
+| `RATE_LIMIT_LOGIN_EMAIL` | `5/15m` | hash do e-mail (conta comum) |
+| `RATE_LIMIT_LOGIN_ADMIN_EMAIL` | `3/15m` | hash do e-mail (admin **e e-mail inexistente**, para o 429 não revelar quem é admin) |
+| `RATE_LIMIT_REFRESH` | `30/1m` | hash do cookie de refresh (sessão) |
+| `RATE_LIMIT_PUBLIC_WRITE` | `3/1h` | IP, em `POST /api/orders` e nos caminhos de `security.rate-limit.sensitive-paths` (cadastro e recuperação de senha, quando existirem) |
+| `RATE_LIMIT_API_USER` | `100/1m` | usuário logado (independe do IP) |
+| `RATE_LIMIT_API_ANON` | `60/1m` | IP, sem login |
+
+Formato `máximo/janela` (`5/15m`, `100/1m`, `3/1h`). `RATE_LIMIT_ENABLED=false` desliga tudo. Além disto, o bloqueio
+progressivo do login (`LoginThrottle`, dobra até 30 min e libera sozinho) continua valendo por conta e por IP.
+
+- **Resposta**: 429 com `Retry-After`, `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset` (segundos) e a
+  mensagem genérica `Too many requests. Try again later.`. As demais respostas também levam os `RateLimit-*`. Os
+  cabeçalhos são expostos no CORS para o front poder lê-los.
+- **Onde ficam os baldes** (`RATE_LIMIT_STORE`, padrão `auto`): `REDIS_URL` definido → Redis; senão, memória nos perfis
+  `dev`/`test` (cada instância conta sozinha: só para desenvolvimento) e **Postgres** nos demais (tabela
+  `rate_limit_bucket`, compartilhada entre instâncias, algumas consultas por requisição). Para trocar do Postgres para o
+  Redis basta definir `REDIS_URL` (`redis://` ou `rediss://`); nada mais muda. Se o armazenamento falhar, as requisições
+  passam (e o erro vai para o log): o login segue protegido pelo `LoginThrottle`.
+- **IP real** (`TRUSTED_PROXY_HOPS`): cada proxy seu acrescenta ao **fim** de `X-Forwarded-For` quem falou com ele; o
+  que vem antes é escrito pelo cliente e pode ser forjado. Com N proxies na frente da API (Vercel + Render = **2**,
+  padrão em `prod`; `0` em `dev`, que ignora o cabeçalho), o IP é o item N contando do fim. Itens inválidos ou em
+  menor número que N caem no endereço da conexão. Em IPv6 o limite é por faixa /64.
+  **Confirme na Vercel** que o rewrite repassa o IP do visitante em `X-Forwarded-For` (senão todos aparecem com o
+  IP da Vercel e dividem o mesmo limite por IP). **Restrinja o Render** a aceitar só a Vercel (ex.: um cabeçalho
+  secreto no rewrite): quem acessar a API direto escreve o item que o limitador usa e pode forjar o IP. O limite por
+  e-mail não depende de IP e continua valendo.
+- **Área admin oculta**: para um usuário autenticado que não é admin, `/api/admin/**` responde **404** e nunca
+  passa pelo limitador (não existe 429 que revele a rota). Sem autenticação, o 401 comum de qualquer rota protegida.
+- **Monitoramento**: ao atingir o limite, um `WARN` `Rate limit atingido: rule=... subject=... ip=...` (no máximo um por
+  balde por minuto) e um evento `RATE_LIMITED` na auditoria. Nunca registra e-mail ou token em texto, só hash.
 
 ### Administradores e auditoria
 

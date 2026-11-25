@@ -16,6 +16,10 @@ import com.example.fausto_importados_api.security.jwt.JwtAuthenticationFilter;
 import com.example.fausto_importados_api.security.jwt.JwtService;
 import com.example.fausto_importados_api.security.mfa.MfaException;
 import com.example.fausto_importados_api.security.mfa.MfaService;
+import com.example.fausto_importados_api.security.ratelimit.Decision;
+import com.example.fausto_importados_api.security.ratelimit.LoginRateLimit;
+import com.example.fausto_importados_api.security.ratelimit.Decision;
+import com.example.fausto_importados_api.security.ratelimit.LoginRateLimit;
 import com.example.fausto_importados_api.security.refresh.RefreshCookieFactory;
 import com.example.fausto_importados_api.security.refresh.RefreshRequestGuard;
 import com.example.fausto_importados_api.security.refresh.RefreshTokenService;
@@ -51,6 +55,7 @@ public class AuthController {
     private final RefreshCookieFactory cookies;
     private final RefreshRequestGuard refreshGuard;
     private final LoginThrottle throttle;
+    private final LoginRateLimit loginRateLimit;
     private final MfaService mfaService;
     private final UserRepository users;
     private final AuthProperties props;
@@ -64,6 +69,7 @@ public class AuthController {
             RefreshCookieFactory cookies,
             RefreshRequestGuard refreshGuard,
             LoginThrottle throttle,
+            LoginRateLimit loginRateLimit,
             MfaService mfaService,
             UserRepository users,
             AuthProperties props,
@@ -76,6 +82,7 @@ public class AuthController {
         this.cookies = cookies;
         this.refreshGuard = refreshGuard;
         this.throttle = throttle;
+        this.loginRateLimit = loginRateLimit;
         this.mfaService = mfaService;
         this.users = users;
         this.props = props;
@@ -93,6 +100,10 @@ public class AuthController {
     @PostMapping("/login")
     public ResponseEntity<?> login(@Valid @RequestBody JwtRequestDTO request, HttpServletRequest http) {
         String ip = ClientInfo.ip(http);
+        Decision attempts = loginRateLimit.check(request.email(), ip);
+        if (!attempts.allowed()) {
+            return rateLimited(attempts);
+        }
         Optional<Duration> locked = throttle.lockedFor(request.email(), ip);
         if (locked.isPresent()) {
             auditLocked(request.email(), "password");
@@ -336,6 +347,13 @@ public class AuthController {
                 jwtService.generateAccessToken(user, sessionId),
                 jwtService.accessTtl().toSeconds()
         );
+    }
+
+    /** 429 do limite por e-mail: mesma resposta genérica do bloqueio por falhas, mais os cabeçalhos RateLimit-*. */
+    private static ResponseEntity<ErrorResponseDTO> rateLimited(Decision decision) {
+        ResponseEntity.BodyBuilder response = ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS);
+        decision.writeHeaders(response::header);
+        return response.body(new ErrorResponseDTO(Instant.now().toString(), "Too many attempts. Try again later."));
     }
 
     private static ResponseEntity<ErrorResponseDTO> tooManyAttempts(Duration retryAfter) {

@@ -127,6 +127,13 @@
 			<artifactId>commons-codec</artifactId>
 		</dependency>
 
+		<!-- Rate limiting: cliente Redis (Lettuce), usado só quando REDIS_URL está definido. Sem o starter do Spring
+		     de propósito: ele ligaria a autoconfiguração (e o health check) do Redis mesmo sem Redis configurado -->
+		<dependency>
+			<groupId>io.lettuce</groupId>
+			<artifactId>lettuce-core</artifactId>
+		</dependency>
+
 		<!-- Testa as migrations (Flyway + ddl-auto: validate) contra um Postgres real; pulado se não houver Docker nem banco externo -->
 		<dependency>
 			<groupId>org.testcontainers</groupId>

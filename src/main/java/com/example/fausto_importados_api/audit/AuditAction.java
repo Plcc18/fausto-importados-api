@@ -17,6 +17,7 @@ public enum AuditAction {
     LOGOUT_ALL,
     REFRESH_REUSE_DETECTED,
     ACCESS_DENIED,
+    RATE_LIMITED,
 
     // ── contas administrativas ──
     ADMIN_CREATED,

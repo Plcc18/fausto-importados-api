@@ -31,6 +31,19 @@ security:
     refresh-inactivity: P7D
     refresh-absolute: P30D
     refresh-grace: PT10S
+  # Limites altíssimos: os testes de outros assuntos fazem muitos logins/requisições. Os testes de rate limit
+  # (RateLimitTest) sobrescrevem estes valores.
+  rate-limit:
+    store: memory
+    redis-url: ""
+    trusted-proxy-hops: 1
+    login-ip: 100000/1m
+    login-email: 100000/1m
+    login-admin-email: 100000/1m
+    refresh: 100000/1m
+    public-write: 100000/1m
+    api-user: 100000/1m
+    api-anon: 100000/1m
 
 # Cloudinary (dummy — nenhum teste faz upload real)
 cloudinary:

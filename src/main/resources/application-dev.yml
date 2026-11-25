@@ -34,6 +34,9 @@ security:
     refresh-inactivity: "${REFRESH_INACTIVITY:P7D}"
     refresh-absolute: "${REFRESH_ABSOLUTE:P30D}"
     refresh-grace: "${REFRESH_GRACE:PT10S}"
+  rate-limit:
+    # Sem proxy em dev: ignora X-Forwarded-For (qualquer um pode forjá-lo)
+    trusted-proxy-hops: "${TRUSTED_PROXY_HOPS:0}"
 
 # Cloudinary
 cloudinary:

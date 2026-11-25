@@ -47,6 +47,21 @@ security:
     refresh-inactivity: "${REFRESH_INACTIVITY:P7D}"
     refresh-absolute: "${REFRESH_ABSOLUTE:P30D}"
     refresh-grace: "${REFRESH_GRACE:PT10S}"
+  # Rate limiting. Cada regra é <máximo>/<janela> (ex.: 5/15m, 100/1m, 3/1h). Ver README.
+  rate-limit:
+    enabled: "${RATE_LIMIT_ENABLED:true}"
+    # auto = Redis se REDIS_URL existir; senão memória (dev/teste) ou Postgres. Também: redis | jdbc | memory
+    store: "${RATE_LIMIT_STORE:auto}"
+    redis-url: "${REDIS_URL:}"
+    # Quantos proxies seus ficam na frente da API (0 = ignora X-Forwarded-For). Vercel + Render = 2 (ver application-prod.yml)
+    trusted-proxy-hops: "${TRUSTED_PROXY_HOPS:1}"
+    login-ip: "${RATE_LIMIT_LOGIN_IP:5/15m}"
+    login-email: "${RATE_LIMIT_LOGIN_EMAIL:5/15m}"
+    login-admin-email: "${RATE_LIMIT_LOGIN_ADMIN_EMAIL:3/15m}"
+    refresh: "${RATE_LIMIT_REFRESH:30/1m}"
+    public-write: "${RATE_LIMIT_PUBLIC_WRITE:3/1h}"
+    api-user: "${RATE_LIMIT_API_USER:100/1m}"
+    api-anon: "${RATE_LIMIT_API_ANON:60/1m}"
 
 # Cloudinary
 cloudinary:
