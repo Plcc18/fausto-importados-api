@@ -147,14 +147,22 @@ progressivo do login (`LoginThrottle`, dobra até 30 min e libera sozinho) conti
   `rate_limit_bucket`, compartilhada entre instâncias, algumas consultas por requisição). Para trocar do Postgres para o
   Redis basta definir `REDIS_URL` (`redis://` ou `rediss://`); nada mais muda. Se o armazenamento falhar, as requisições
   passam (e o erro vai para o log): o login segue protegido pelo `LoginThrottle`.
-- **IP real** (`TRUSTED_PROXY_HOPS`): cada proxy seu acrescenta ao **fim** de `X-Forwarded-For` quem falou com ele; o
-  que vem antes é escrito pelo cliente e pode ser forjado. Com N proxies na frente da API (Vercel + Render = **2**,
-  padrão em `prod`; `0` em `dev`, que ignora o cabeçalho), o IP é o item N contando do fim. Itens inválidos ou em
-  menor número que N caem no endereço da conexão. Em IPv6 o limite é por faixa /64.
-  **Confirme na Vercel** que o rewrite repassa o IP do visitante em `X-Forwarded-For` (senão todos aparecem com o
-  IP da Vercel e dividem o mesmo limite por IP). **Restrinja o Render** a aceitar só a Vercel (ex.: um cabeçalho
-  secreto no rewrite): quem acessar a API direto escreve o item que o limitador usa e pode forjar o IP. O limite por
-  e-mail não depende de IP e continua valendo.
+- **IP real**, por dois caminhos:
+  - **Chamadas diretas do navegador ao Render** (`/api/**`, só o Render na frente): o Render acrescenta ao **fim** de
+    `X-Forwarded-For` quem conectou; o que vem antes é escrito pelo cliente e pode ser forjado. Com `TRUSTED_PROXY_HOPS`
+    = N proxies na frente (**1** em `prod`; `0` em `dev`, que ignora o cabeçalho), o IP é o item N contando do fim.
+    Itens inválidos ou em menor número que N caem no endereço da conexão. Em IPv6 o limite é por faixa /64.
+    Com um valor maior que o real (era 2 antes), todo mundo cai no endereço da conexão e divide o mesmo balde.
+  - **`/auth/*` pela Vercel**: o rewrite da Vercel **não** entrega o IP do visitante (a API só via o endereço de saída
+    da Vercel, o mesmo para todos). Por isso `/auth/*` passa por uma função de borda no front
+    (`api/auth/[...path].ts`), que lê o IP preenchido pela Vercel e o repassa em `X-Client-IP`, junto com
+    `X-Proxy-Secret`. A API só acredita no IP quando o segredo confere (`PROXY_SHARED_SECRET`, mínimo 32 caracteres,
+    comparação em tempo constante); sem o segredo o cabeçalho é ignorado.
+  - **`PROXY_REQUIRE_FOR_AUTH=true`** faz `/auth/**` responder **404** a quem não trouxer o segredo: ninguém chega ao
+    login pelo Render direto, então o limite por IP não se contorna. Exige `PROXY_SHARED_SECRET`. Ligue só depois que o
+    front estiver enviando o segredo (a API recusa subir se faltar). Os comandos do runbook que chamam `/auth/login` na
+    API direto passam a precisar de `-H "X-Proxy-Secret: $PROXY_SHARED_SECRET"`.
+  O limite por e-mail e por sessão não depende de IP e continua valendo em qualquer caso.
 - **Área admin oculta**: para um usuário autenticado que não é admin, `/api/admin/**` responde **404** e nunca
   passa pelo limitador (não existe 429 que revele a rota). Sem autenticação, o 401 comum de qualquer rota protegida.
 - **Monitoramento**: ao atingir o limite, um `WARN` `Rate limit atingido: rule=... subject=... ip=...` (no máximo um por

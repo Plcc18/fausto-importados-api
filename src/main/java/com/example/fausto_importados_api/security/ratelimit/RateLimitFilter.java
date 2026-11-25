@@ -45,11 +45,13 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private final RateLimiter limiter;
     private final RateLimitProperties props;
     private final ObjectMapper json;
+    private final ProxyGate proxyGate;
 
-    public RateLimitFilter(RateLimiter limiter, RateLimitProperties props, ObjectMapper json) {
+    public RateLimitFilter(RateLimiter limiter, RateLimitProperties props, ObjectMapper json, ProxyGate proxyGate) {
         this.limiter = limiter;
         this.props = props;
         this.json = json;
+        this.proxyGate = proxyGate;
     }
 
     private record Check(String name, Rule rule, String subject) {
@@ -59,7 +61,17 @@ public class RateLimitFilter extends OncePerRequestFilter {
     protected void doFilterInternal(
             HttpServletRequest request, HttpServletResponse response, FilterChain chain
     ) throws ServletException, IOException {
-        String ip = ClientInfo.resolve(request, props.trustedProxyHops());
+        String path = path(request);
+
+        // /auth/** só pelo proxy do front (quando exigido): 404, como se a rota não existisse
+        if (!"OPTIONS".equals(request.getMethod()) && proxyGate.mustBlock(request, path)) {
+            response.sendError(HttpServletResponse.SC_NOT_FOUND);
+            return;
+        }
+
+        // IP informado pelo proxy do front (segredo conferido) ou, na falta dele, o que a cadeia de proxies mostra
+        String ip = proxyGate.clientIp(request)
+                .orElseGet(() -> ClientInfo.resolve(request, props.trustedProxyHops()));
         request.setAttribute(ClientInfo.ATTRIBUTE, ip);
 
         if (!props.enabled()) {
@@ -67,7 +79,6 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return;
         }
 
-        String path = path(request);
         User user = currentUser();
 
         if (isAdminArea(path) && user != null && !user.isAdmin()) {

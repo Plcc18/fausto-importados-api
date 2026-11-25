@@ -4,6 +4,7 @@ import com.example.fausto_importados_api.security.jwt.JsonAccessDeniedHandler;
 import com.example.fausto_importados_api.security.jwt.JwtAuthenticationEntryPoint;
 import com.example.fausto_importados_api.security.jwt.JwtAuthenticationFilter;
 import com.example.fausto_importados_api.security.jwt.JwtUserDetailsService;
+import com.example.fausto_importados_api.security.ratelimit.ProxyGate;
 import com.example.fausto_importados_api.security.ratelimit.RateLimitFilter;
 import com.example.fausto_importados_api.security.ratelimit.RateLimitProperties;
 import com.example.fausto_importados_api.security.ratelimit.RateLimiter;
@@ -54,7 +55,8 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain filterChain(
-            HttpSecurity http, RateLimiter rateLimiter, RateLimitProperties rateLimitProperties, ObjectMapper json
+            HttpSecurity http, RateLimiter rateLimiter, RateLimitProperties rateLimitProperties, ObjectMapper json,
+            ProxyGate proxyGate
     ) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
@@ -87,7 +89,8 @@ public class SecurityConfig {
                 )
                 .addFilterBefore(authenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 // Depois do JWT (precisa saber quem é o usuário) e antes da autorização: um 429 vem antes do 401/403
-                .addFilterAfter(new RateLimitFilter(rateLimiter, rateLimitProperties, json), JwtAuthenticationFilter.class);
+                .addFilterAfter(new RateLimitFilter(rateLimiter, rateLimitProperties, json, proxyGate),
+                        JwtAuthenticationFilter.class);
 
         return http.build();
     }

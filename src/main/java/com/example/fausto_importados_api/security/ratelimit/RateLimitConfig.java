@@ -25,7 +25,7 @@ import java.time.Clock;
  * {@code security.rate-limit.store} força uma escolha. Pedir {@code redis} sem {@code REDIS_URL} falha na partida.
  */
 @Configuration
-@EnableConfigurationProperties(RateLimitProperties.class)
+@EnableConfigurationProperties({RateLimitProperties.class, ProxyProperties.class})
 public class RateLimitConfig {
 
     private static final Logger log = LoggerFactory.getLogger(RateLimitConfig.class);
@@ -67,6 +67,14 @@ public class RateLimitConfig {
             log.warn("Rate limit em MEMÓRIA: cada instância conta sozinha. Use só em desenvolvimento.");
         }
         return store;
+    }
+
+    @Bean
+    public ProxyGate proxyGate(ProxyProperties props) {
+        ProxyGate gate = new ProxyGate(props);
+        log.info("Proxy do front (X-Proxy-Secret): {}{}", gate.enabled() ? "ligado" : "desligado",
+                props.requireForAuth() ? ", /auth/** exige o segredo" : "");
+        return gate;
     }
 
     @Bean

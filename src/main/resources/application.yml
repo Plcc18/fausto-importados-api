@@ -41,6 +41,12 @@ security:
   # Gere com: openssl rand -base64 32. Perder esta chave obriga todos os admins a refazer o 2FA.
   totp:
     encryption-key: "${TOTP_ENCRYPTION_KEY:}"
+  # Proxy do front (função da Vercel que repassa /auth/*). A Vercel não entrega o IP do visitante a quem recebe o
+  # rewrite; a função o repassa em X-Client-IP junto com este segredo. Vazio = recurso desligado. Mínimo 32 caracteres.
+  # Gere com: openssl rand -base64 32. require-for-auth=true faz /auth/** responder 404 a quem não trouxer o segredo.
+  proxy:
+    shared-secret: "${PROXY_SHARED_SECRET:}"
+    require-for-auth: "${PROXY_REQUIRE_FOR_AUTH:false}"
   # Access token curto + refresh token com sessão deslizante (valores ISO-8601)
   auth:
     access-ttl: "${JWT_ACCESS_TTL:PT15M}"
@@ -53,7 +59,7 @@ security:
     # auto = Redis se REDIS_URL existir; senão memória (dev/teste) ou Postgres. Também: redis | jdbc | memory
     store: "${RATE_LIMIT_STORE:auto}"
     redis-url: "${REDIS_URL:}"
-    # Quantos proxies seus ficam na frente da API (0 = ignora X-Forwarded-For). Vercel + Render = 2 (ver application-prod.yml)
+    # Quantos proxies seus ficam na frente da API (0 = ignora X-Forwarded-For). Render = 1 (ver application-prod.yml)
     trusted-proxy-hops: "${TRUSTED_PROXY_HOPS:1}"
     login-ip: "${RATE_LIMIT_LOGIN_IP:5/15m}"
     login-email: "${RATE_LIMIT_LOGIN_EMAIL:5/15m}"

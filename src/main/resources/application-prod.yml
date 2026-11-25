@@ -38,8 +38,9 @@ security:
     refresh-absolute: "${REFRESH_ABSOLUTE:P30D}"
     refresh-grace: "${REFRESH_GRACE:PT10S}"
   rate-limit:
-    # Vercel (rewrite) + Render = 2 proxies na frente da API. Confira com o README antes de mudar.
-    trusted-proxy-hops: "${TRUSTED_PROXY_HOPS:2}"
+    # Só o Render fica na frente da API: o navegador chama a API direto e o Render acrescenta o IP de quem conectou
+    # ao FIM de X-Forwarded-For. O IP de quem passa pela Vercel (/auth/*) vem por X-Client-IP + PROXY_SHARED_SECRET.
+    trusted-proxy-hops: "${TRUSTED_PROXY_HOPS:1}"
 
 # Cloudinary
 cloudinary:

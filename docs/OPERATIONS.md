@@ -51,6 +51,8 @@ Ainda não há tela para gerir administradores; use a API. Cada alteração exig
 
 ```bash
 API=https://fausto-importados-api.onrender.com
+# Se PROXY_REQUIRE_FOR_AUTH=true na API, /auth/* só responde com o segredo do proxy (senão: 404):
+# PS="-H X-Proxy-Secret:$PROXY_SHARED_SECRET"  e acrescente $PS aos curl de /auth abaixo
 
 # 1) senha  -> devolve um "challenge"
 CH=$(curl -s "$API/auth/login" -H 'Content-Type: application/json' \
@@ -167,9 +169,10 @@ DELETE FROM auth_throttle;                                  -- tudo
 -- ou só uma conta: o outro admin usa reset-credentials (seção 6), que também destrava
 ```
 
-> Limitação conhecida: atrás do proxy da Vercel (rotas `/auth/*`), o IP que a API enxerga é o da própria Vercel
-> (compartilhado). Por isso o controle principal é **por conta**; o limite por IP protege de verdade só quem acessa a API
-> diretamente. Um atacante pode travar uma conta por até 30 min; nunca consegue entrar nela por isso.
+> O IP de quem entra por `/auth/*` chega pela função de borda da Vercel (`X-Client-IP` + `X-Proxy-Secret`, ver README,
+> "Rate limiting"). Sem o segredo configurado nos dois lados, a API só enxerga o endereço de saída da Vercel (o mesmo para
+> todos): aí o controle principal é **por conta**. Um atacante pode travar uma conta por até 30 min; nunca consegue
+> entrar nela por isso.
 
 ## 9. A chave `TOTP_ENCRYPTION_KEY`
 
