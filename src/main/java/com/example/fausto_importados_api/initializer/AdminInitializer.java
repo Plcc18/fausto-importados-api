@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
@@ -51,7 +52,12 @@ public class AdminInitializer implements CommandLineRunner {
         admin.setPassword(passwordEncoder.encode(adminPassword));
         admin.setRole(Role.ADMIN);
         admin.setActive(true);
-        users.save(admin);
+        try {
+            users.saveAndFlush(admin);
+        } catch (DataIntegrityViolationException createdByAnotherInstance) {
+            log.info("Administrador inicial já criado por outra instância");
+            return;
+        }
 
         log.info("Administrador inicial criado: {} (o 2FA é cadastrado no primeiro login)", adminEmail);
     }

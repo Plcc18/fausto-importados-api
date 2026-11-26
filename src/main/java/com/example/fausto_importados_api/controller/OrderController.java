@@ -2,6 +2,8 @@ package com.example.fausto_importados_api.controller;
 
 import com.example.fausto_importados_api.audit.AuditAction;
 import com.example.fausto_importados_api.audit.AuditService;
+import com.example.fausto_importados_api.concurrency.IdempotencyService;
+import com.example.fausto_importados_api.concurrency.Transactions;
 import com.example.fausto_importados_api.dto.CreateOrderDTO;
 import com.example.fausto_importados_api.dto.OrderResponseDTO;
 import com.example.fausto_importados_api.dto.SalesStatsDTO;
@@ -11,6 +13,8 @@ import com.example.fausto_importados_api.model.enums.OrderStatus;
 import com.example.fausto_importados_api.security.reauth.RequiresReauth;
 import com.example.fausto_importados_api.services.OrderService;
 import com.example.fausto_importados_api.services.exception.BusinessException;
+import com.example.fausto_importados_api.services.exception.InvalidOrderStatusException;
+import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -26,17 +30,30 @@ public class OrderController {
     private final OrderService orderService;
     private final OrderMapper orderMapper;
     private final AuditService audit;
+    private final IdempotencyService idempotency;
+    private final Transactions transactions;
 
-    public OrderController(OrderService orderService, OrderMapper orderMapper, AuditService audit) {
+    public OrderController(
+            OrderService orderService,
+            OrderMapper orderMapper,
+            AuditService audit,
+            IdempotencyService idempotency,
+            Transactions transactions
+    ) {
         this.orderService = orderService;
         this.orderMapper = orderMapper;
         this.audit = audit;
+        this.idempotency = idempotency;
+        this.transactions = transactions;
     }
 
     @PostMapping
-    public ResponseEntity<OrderResponseDTO> createOrder(@RequestBody CreateOrderDTO dto) {
-        var order = orderService.createOrder(orderMapper.toEntity(dto));
-        return ResponseEntity.ok(orderMapper.toResponseDTO(order));
+    public ResponseEntity<?> createOrder(
+            @RequestHeader(value = IdempotencyService.HEADER, required = false) String idempotencyKey,
+            @Valid @RequestBody CreateOrderDTO dto
+    ) {
+        return idempotency.execute(idempotencyKey, "orders.create", dto,
+                () -> ResponseEntity.ok(orderMapper.toResponseDTO(orderService.createOrder(dto))));
     }
 
     @GetMapping
@@ -66,15 +83,22 @@ public class OrderController {
 
     @PostMapping("/{id}/complete")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<?> completeOrder(@PathVariable UUID id) {
+    public ResponseEntity<?> completeOrder(
+            @PathVariable UUID id,
+            @RequestHeader(value = IdempotencyService.HEADER, required = false) String idempotencyKey
+    ) {
         try {
-            Order completed = orderService.complete(id);
-            audit.recordSuccess(AuditAction.ORDER_COMPLETED, "ORDER", id, Map.of(
-                    "total", String.valueOf(completed.getTotal()),
-                    "items", completed.getItems().stream()
-                            .map(item -> Map.of("productId", String.valueOf(item.getProductId()), "quantity", item.getQuantity()))
-                            .toList()));
-            return ResponseEntity.ok(orderMapper.toResponseDTO(completed));
+            return idempotency.execute(idempotencyKey, "orders.complete:" + id, null, () -> {
+                Order completed = orderService.complete(id);
+                Map<String, Object> details = Map.of(
+                        "total", String.valueOf(completed.getTotal()),
+                        "items", completed.getItems().stream()
+                                .map(item -> Map.of("productId", String.valueOf(item.getProductId()), "quantity", item.getQuantity()))
+                                .toList());
+                transactions.afterCommit(() ->
+                        audit.recordSuccess(AuditAction.ORDER_COMPLETED, "ORDER", id, details));
+                return ResponseEntity.ok(orderMapper.toResponseDTO(completed));
+            });
         } catch (BusinessException e) {
             // Returns 409 with the stock error message so the frontend can show it
             return ResponseEntity.status(409).body(Map.of("error", e.getMessage()));
@@ -83,10 +107,20 @@ public class OrderController {
 
     @PostMapping("/{id}/cancel")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<OrderResponseDTO> cancelOrder(@PathVariable UUID id) {
-        Order cancelled = orderService.cancel(id);
-        audit.recordSuccess(AuditAction.ORDER_CANCELLED, "ORDER", id, null);
-        return ResponseEntity.ok(orderMapper.toResponseDTO(cancelled));
+    public ResponseEntity<?> cancelOrder(
+            @PathVariable UUID id,
+            @RequestHeader(value = IdempotencyService.HEADER, required = false) String idempotencyKey
+    ) {
+        try {
+            return idempotency.execute(idempotencyKey, "orders.cancel:" + id, null, () -> {
+                Order cancelled = orderService.cancel(id);
+                transactions.afterCommit(() ->
+                        audit.recordSuccess(AuditAction.ORDER_CANCELLED, "ORDER", id, null));
+                return ResponseEntity.ok(orderMapper.toResponseDTO(cancelled));
+            });
+        } catch (InvalidOrderStatusException e) {
+            return ResponseEntity.status(409).body(Map.of("error", e.getMessage()));
+        }
     }
 
     @DeleteMapping("/clear-history")

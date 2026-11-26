@@ -1,5 +1,9 @@
 package com.example.fausto_importados_api.service;
 
+import com.example.fausto_importados_api.concurrency.ConcurrencyProperties;
+import com.example.fausto_importados_api.concurrency.Transactions;
+import com.example.fausto_importados_api.concurrency.Versions;
+import com.example.fausto_importados_api.mapper.ProductMapper;
 import com.example.fausto_importados_api.model.Product;
 import com.example.fausto_importados_api.model.enums.Category;
 import com.example.fausto_importados_api.repository.ProductRepository;
@@ -10,15 +14,16 @@ import com.example.fausto_importados_api.services.exception.ProductNotFoundExcep
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -35,7 +40,6 @@ class ProductServiceTest {
     @Mock
     private ProductRepository productRepository;
 
-    @InjectMocks
     private ProductService productService;
 
     private Product product;
@@ -43,6 +47,12 @@ class ProductServiceTest {
     //executar primeiro
     @BeforeEach
     void setUp() {
+        ConcurrencyProperties properties =
+                new ConcurrencyProperties(3, Duration.ofMillis(1), false, false, Duration.ofDays(1));
+        // transação de mentira: o que interessa aqui são as regras do serviço
+        productService = new ProductService(productRepository, null, new ProductMapper(),
+                new Transactions(mock(PlatformTransactionManager.class), properties), new Versions(properties));
+
         product = new Product();
         product.setName("Ceboliinha");
         product.setPrice(new BigDecimal(100));
@@ -94,16 +104,16 @@ class ProductServiceTest {
     //Save
     @Test
     void shouldSaveProductSuccesfully() {
-        when(productRepository.existsByName(product.getName()))
+        when(productRepository.existsActiveDuplicate(any(), any(), any(), any()))
                 .thenReturn(false);
 
-        when(productRepository.save(any(Product.class)))
+        when(productRepository.saveAndFlush(any(Product.class)))
                 .thenAnswer(invocationOnMock -> invocationOnMock.getArgument(0));
 
         Product saved = productService.save(product);
 
         assertThat(saved.getActive()).isTrue();
-        verify(productRepository).save(product);
+        verify(productRepository).saveAndFlush(product);
     }
 
     @Test
@@ -114,7 +124,7 @@ class ProductServiceTest {
                 .isInstanceOf(InvalidProductException.class)
                 .hasMessage("Product name is required");
 
-        verify(productRepository, never()).save(any());
+        verify(productRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -146,7 +156,7 @@ class ProductServiceTest {
 
     @Test
     void shouldThrowExceptionWhenProductAlreadyExists() {
-        when(productRepository.existsByName(product.getName()))
+        when(productRepository.existsActiveDuplicate(any(), any(), any(), any()))
                 .thenReturn(true);
 
         assertThatThrownBy(() -> productService.save(product))

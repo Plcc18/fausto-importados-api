@@ -4,6 +4,7 @@ import com.example.fausto_importados_api.model.enums.Role;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotBlank;
 import lombok.*;
+import org.hibernate.annotations.DynamicUpdate;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -15,6 +16,8 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "users")
+// Grava só as colunas alteradas: um update não desfaz o que outra operação mudou (ex.: totp_last_step)
+@DynamicUpdate
 @Getter
 @Setter
 @NoArgsConstructor
@@ -60,6 +63,11 @@ public class User implements UserDetails {
     /** Prazo para concluir o cadastro do 2FA (conta nova ou redefinida). Nulo = sem prazo. */
     @Column(name = "enrollment_expires_at")
     private Instant enrollmentExpiresAt;
+
+    /** Lock otimista. */
+    @Version
+    @Column(nullable = false)
+    private Long version;
 
     public Collection<? extends GrantedAuthority> getAuthorities() {
         return List.of(new SimpleGrantedAuthority("ROLE_" + role.name()));

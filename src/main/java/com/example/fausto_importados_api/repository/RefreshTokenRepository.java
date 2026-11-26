@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -21,6 +22,13 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, UUID
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select t from RefreshToken t where t.tokenHash = :hash")
     Optional<RefreshToken> findByTokenHashForUpdate(@Param("hash") String hash);
+
+    /** Dono do token, sem carregar nem travar a linha: o usuário precisa ser travado ANTES do token. */
+    @Query("select t.userId from RefreshToken t where t.tokenHash = :hash")
+    Optional<UUID> findUserIdByTokenHash(@Param("hash") String hash);
+
+    @Query("select distinct t.userId from RefreshToken t where t.familyId = :familyId")
+    List<UUID> findUserIdsByFamilyId(@Param("familyId") UUID familyId);
 
     /** A sessão (família) continua válida? Usado a cada request autenticado, via claim "sid". */
     @Query("""

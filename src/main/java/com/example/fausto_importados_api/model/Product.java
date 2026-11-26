@@ -93,6 +93,11 @@ public class Product {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
+    /** Lock otimista. As baixas de estoque (update direto no banco) também a incrementam. */
+    @Version
+    @Column(nullable = false)
+    private Long version;
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;

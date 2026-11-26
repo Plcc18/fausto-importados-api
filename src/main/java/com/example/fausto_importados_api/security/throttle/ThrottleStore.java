@@ -16,13 +16,26 @@ import java.util.Optional;
  * Acesso transacional aos contadores. Cada operação de escrita roda numa transação própria: a contagem
  * precisa ser confirmada mesmo que a requisição que falhou termine em erro.
  *
- * <p>Contar falhas em paralelo sem perder nenhuma exige dois passos (ver {@link LoginThrottle}):
- * primeiro garantir que a linha existe ({@link #ensureRow}); depois travá-la e incrementar
- * ({@link #registerFailure}). Criar e incrementar de uma vez só deixaria duas requisições "criarem" a
+ * <p>Contar tentativas em paralelo sem perder nenhuma exige dois passos (ver {@link LoginThrottle}):
+ * primeiro garantir que a linha existe ({@link #ensureRow}); depois travá-la, conferir o bloqueio e incrementar
+ * ({@link #reserve}). Criar e incrementar de uma vez só deixaria duas requisições "criarem" a
  * mesma linha e uma sobrescreveria a contagem da outra.
  */
 @Repository
 public class ThrottleStore {
+
+    /**
+     * Resultado de reservar uma tentativa numa chave.
+     *
+     * @param blockedUntil fim do bloqueio que impediu a tentativa; nulo se ela foi contada
+     * @param lockSet      bloqueio que ESTA tentativa criou ao atingir o limite; nulo se não criou
+     * @param countedAt    quando a tentativa foi contada
+     * @param previous     última atividade da chave antes dela
+     */
+    public record Slot(
+            String key, int threshold, Instant blockedUntil, Instant lockSet, Instant countedAt, Instant previous
+    ) {
+    }
 
     private final AuthThrottleRepository repository;
 
@@ -56,21 +69,28 @@ public class ThrottleStore {
     }
 
     /**
-     * Soma uma falha à chave (com a linha travada) e, ao atingir o limite, a bloqueia. O bloqueio dobra a cada
-     * nova falha, até {@code max}.
+     * Com a linha travada: se a chave está bloqueada, recusa; senão conta a tentativa e, ao atingir o limite,
+     * bloqueia as próximas. O bloqueio dobra a cada nova falha, até {@code max}. Conferir e contar no mesmo passo
+     * impede que requisições simultâneas testem mais credenciais do que o limite.
      *
-     * @return {@code false} se a linha não existe (foi apagada por um login bem-sucedido entre
-     *         {@link #ensureRow} e aqui): o chamador recria e tenta de novo
+     * @return vazio se a linha não existe (foi apagada por um login bem-sucedido entre {@link #ensureRow} e aqui):
+     *         o chamador recria e tenta de novo
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public boolean registerFailure(
+    public Optional<Slot> reserve(
             String key, int threshold, Duration baseLock, Duration max, Duration window, Instant now
     ) {
         Optional<AuthThrottle> found = repository.findForUpdate(key);
         if (found.isEmpty()) {
-            return false;
+            return Optional.empty();
         }
         AuthThrottle row = found.get();
+
+        if (row.getLockedUntil() != null && row.getLockedUntil().isAfter(now)) {
+            return Optional.of(new Slot(key, threshold, row.getLockedUntil(), null, now, row.getUpdatedAt()));
+        }
+
+        Instant previous = row.getUpdatedAt();
 
         // Falhas antigas são esquecidas: uma senha errada hoje não soma com uma de semana passada.
         if (Duration.between(row.getUpdatedAt(), now).compareTo(window) > 0) {
@@ -82,16 +102,35 @@ public class ThrottleStore {
         row.setFailures(failures);
         row.setUpdatedAt(now);
 
+        Instant lockSet = null;
         if (failures >= threshold) {
             int doublings = Math.min(failures - threshold, 20);
             Duration lock = baseLock.multipliedBy(1L << doublings);
             if (lock.compareTo(max) > 0) {
                 lock = max;
             }
-            row.setLockedUntil(now.plus(lock));
+            lockSet = now.plus(lock);
+            row.setLockedUntil(lockSet);
         }
         repository.save(row);
-        return true;
+        return Optional.of(new Slot(key, threshold, null, lockSet, now, previous));
+    }
+
+    /** Devolve uma tentativa que se revelou legítima (a credencial conferiu ou nem chegou a ser testada). */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void release(Slot slot) {
+        repository.findForUpdate(slot.key()).ifPresent(row -> {
+            row.setFailures(Math.max(0, row.getFailures() - 1));
+            boolean lockedByThisAttempt = slot.lockSet() != null && slot.lockSet().equals(row.getLockedUntil());
+            if (lockedByThisAttempt || row.getFailures() < slot.threshold()) {
+                row.setLockedUntil(null);
+            }
+            // uma tentativa legítima não renova a janela das falhas antigas (importa num IP compartilhado)
+            if (slot.countedAt().equals(row.getUpdatedAt())) {
+                row.setUpdatedAt(slot.previous());
+            }
+            repository.save(row);
+        });
     }
 
     @Transactional

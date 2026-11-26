@@ -2,18 +2,27 @@ package com.example.fausto_importados_api.repository;
 
 import com.example.fausto_importados_api.model.Order;
 import com.example.fausto_importados_api.model.enums.OrderStatus;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Repository
 public interface OrderRepository extends JpaRepository<Order, UUID> {
+
+    /** Trava o pedido: concluir e cancelar o mesmo pedido acontecem um de cada vez. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select o from Order o where o.id = :id")
+    Optional<Order> findByIdForUpdate(@Param("id") UUID id);
 
     // All orders sorted by date (notifications panel — shows all statuses, not filtered by hidden)
     List<Order> findAllByOrderByCreatedAtDesc();

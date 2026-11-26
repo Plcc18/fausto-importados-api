@@ -12,9 +12,9 @@ import com.example.fausto_importados_api.security.jwt.JwtAuthenticationFilter;
 import com.example.fausto_importados_api.security.jwt.JwtService;
 import com.example.fausto_importados_api.security.mfa.MfaService;
 import com.example.fausto_importados_api.security.mfa.RecoveryCodeService;
-import com.example.fausto_importados_api.security.refresh.RefreshTokenService;
 import com.example.fausto_importados_api.security.reauth.RequiresReauth;
 import com.example.fausto_importados_api.security.throttle.LoginThrottle;
+import com.example.fausto_importados_api.services.AccountService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
@@ -50,7 +50,7 @@ public class AccountController {
     private final AuditService audit;
     private final UserRepository users;
     private final PasswordEncoder passwordEncoder;
-    private final RefreshTokenService sessions;
+    private final AccountService accounts;
     private final RecoveryCodeService recoveryCodes;
 
     public AccountController(
@@ -60,7 +60,7 @@ public class AccountController {
             AuditService audit,
             UserRepository users,
             PasswordEncoder passwordEncoder,
-            RefreshTokenService sessions,
+            AccountService accounts,
             RecoveryCodeService recoveryCodes
     ) {
         this.mfaService = mfaService;
@@ -69,7 +69,7 @@ public class AccountController {
         this.audit = audit;
         this.users = users;
         this.passwordEncoder = passwordEncoder;
-        this.sessions = sessions;
+        this.accounts = accounts;
         this.recoveryCodes = recoveryCodes;
     }
 
@@ -83,16 +83,16 @@ public class AccountController {
         UUID sessionId = (UUID) http.getAttribute(JwtAuthenticationFilter.SESSION_ATTRIBUTE);
         String ip = ClientInfo.ip(http);
 
-        Optional<Duration> locked = throttle.lockedFor(user.getEmail(), ip);
-        if (locked.isPresent()) {
+        LoginThrottle.Attempt attempt = throttle.reserve(user.getEmail(), ip);
+        if (attempt.blockedFor().isPresent()) {
             audit.recordDeniedAs(user, AuditAction.LOGIN_LOCKED, Map.of("step", "reauth"));
-            return tooManyAttempts(locked.get());
+            return tooManyAttempts(attempt.blockedFor().get());
         }
         if (sessionId == null || mfaService.verify(user.getId(), request.code()).isEmpty()) {
-            throttle.recordFailure(user.getEmail(), ip);
             audit.recordAs(user, AuditAction.REAUTH_FAILURE, Outcome.FAILURE, null);
             return error(HttpStatus.FORBIDDEN, "invalid_code", "Invalid verification code");
         }
+        attempt.release();
 
         audit.recordAs(user, AuditAction.REAUTH_SUCCESS, Outcome.SUCCESS, null);
         return ResponseEntity.ok(new AccountRequests.ReauthResponse(
@@ -111,17 +111,17 @@ public class AccountController {
             HttpServletRequest http
     ) {
         String ip = ClientInfo.ip(http);
-        Optional<Duration> locked = throttle.lockedFor(principal.getEmail(), ip);
-        if (locked.isPresent()) {
-            return tooManyAttempts(locked.get());
+        LoginThrottle.Attempt attempt = throttle.reserve(principal.getEmail(), ip);
+        if (attempt.blockedFor().isPresent()) {
+            return tooManyAttempts(attempt.blockedFor().get());
         }
 
         User user = users.findById(principal.getId()).orElseThrow();
         if (!passwordEncoder.matches(request.currentPassword(), user.getPassword())) {
-            throttle.recordFailure(user.getEmail(), ip);
             audit.recordAs(user, AuditAction.PASSWORD_CHANGED, Outcome.FAILURE, Map.of("reason", "wrong_current_password"));
             return error(HttpStatus.FORBIDDEN, "invalid_password", "Current password is incorrect");
         }
+        attempt.release();
         String violation = PasswordPolicy.violation(request.newPassword(), user.getEmail());
         if (violation != null) {
             return error(HttpStatus.BAD_REQUEST, "weak_password", violation);
@@ -130,14 +130,10 @@ public class AccountController {
             return error(HttpStatus.BAD_REQUEST, "weak_password", "New password must differ from the current one");
         }
 
-        user.setPassword(passwordEncoder.encode(request.newPassword()));
-        users.save(user);
+        // O BCrypt roda fora da transação; a gravação confere, com a conta travada, que nada mudou no meio
         UUID sessionId = (UUID) http.getAttribute(JwtAuthenticationFilter.SESSION_ATTRIBUTE);
-        if (sessionId != null) {
-            sessions.revokeOtherSessions(user.getId(), sessionId);
-        } else {
-            sessions.revokeAllSessions(user.getId());
-        }
+        accounts.changePassword(
+                user.getId(), user.getPassword(), passwordEncoder.encode(request.newPassword()), sessionId);
         audit.recordAs(user, AuditAction.PASSWORD_CHANGED, Outcome.SUCCESS, Map.of("otherSessionsRevoked", true));
         return ResponseEntity.noContent().build();
     }

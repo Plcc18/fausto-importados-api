@@ -3,6 +3,7 @@ package com.example.fausto_importados_api.dto.auth;
 import com.example.fausto_importados_api.model.Product;
 import com.example.fausto_importados_api.model.enums.Category;
 import com.example.fausto_importados_api.model.enums.OlfactiveFamily;
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -23,9 +24,15 @@ public record ProductResponseDTO(
         Boolean inStock,
         Boolean active,
         LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        LocalDateTime updatedAt,
+
+        // Só para administradores (ausentes na resposta pública)
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        Integer stockQuantity,
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        Long version
 ) {
-    public static ProductResponseDTO fromProduct(Product product) {
+    public static ProductResponseDTO fromProduct(Product product, boolean admin) {
         return new ProductResponseDTO(
                 product.getId(),
                 product.getName(),
@@ -41,7 +48,9 @@ public record ProductResponseDTO(
                 product.getInStock(),
                 product.getActive(),
                 product.getCreatedAt(),
-                product.getUpdatedAt()
+                product.getUpdatedAt(),
+                admin ? product.getStockQuantity() : null,
+                admin ? product.getVersion() : null
         );
     }
 }

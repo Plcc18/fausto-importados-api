@@ -18,8 +18,6 @@ import com.example.fausto_importados_api.security.mfa.MfaException;
 import com.example.fausto_importados_api.security.mfa.MfaService;
 import com.example.fausto_importados_api.security.ratelimit.Decision;
 import com.example.fausto_importados_api.security.ratelimit.LoginRateLimit;
-import com.example.fausto_importados_api.security.ratelimit.Decision;
-import com.example.fausto_importados_api.security.ratelimit.LoginRateLimit;
 import com.example.fausto_importados_api.security.refresh.RefreshCookieFactory;
 import com.example.fausto_importados_api.security.refresh.RefreshRequestGuard;
 import com.example.fausto_importados_api.security.refresh.RefreshTokenService;
@@ -104,10 +102,11 @@ public class AuthController {
         if (!attempts.allowed()) {
             return rateLimited(attempts);
         }
-        Optional<Duration> locked = throttle.lockedFor(request.email(), ip);
-        if (locked.isPresent()) {
+        // A tentativa é contada antes de conferir a senha: pedidos simultâneos não passam do limite
+        LoginThrottle.Attempt attempt = throttle.reserve(request.email(), ip);
+        if (attempt.blockedFor().isPresent()) {
             auditLocked(request.email(), "password");
-            return tooManyAttempts(locked.get());
+            return tooManyAttempts(attempt.blockedFor().get());
         }
 
         Authentication authentication;
@@ -116,7 +115,6 @@ public class AuthController {
                     new UsernamePasswordAuthenticationToken(request.email(), request.password())
             );
         } catch (AuthenticationException e) {
-            throttle.recordFailure(request.email(), ip);
             auditLoginFailure(request.email(), "bad_credentials");
             throw e; // resposta genérica em AuthExceptionHandler
         }
@@ -124,6 +122,7 @@ public class AuthController {
         User user = (User) authentication.getPrincipal();
 
         if (user.isAdmin() && (props.mfaRequired() || user.isTotpEnabled())) {
+            attempt.release(); // a senha conferiu: não conta como falha (o 2FA conta as dele)
             if (user.isTotpEnabled()) {
                 return ResponseEntity.ok(LoginResponseDTO.mfaRequired(jwtService.generateMfaChallenge(user)));
             }
@@ -136,7 +135,7 @@ public class AuthController {
                     jwtService.generateMfaChallenge(user), user.isMustChangePassword()));
         }
 
-        return openSession(user, http, null, "password");
+        return openSession(user, http, null, "password", attempt);
     }
 
     /** Segundo fator do login: código do autenticador ou código de recuperação. */
@@ -149,21 +148,21 @@ public class AuthController {
         }
         User user = found.get();
 
-        Optional<Duration> locked = throttle.lockedFor(user.getEmail(), ip);
-        if (locked.isPresent()) {
+        LoginThrottle.Attempt attempt = throttle.reserve(user.getEmail(), ip);
+        if (attempt.blockedFor().isPresent()) {
             audit.recordDeniedAs(user, AuditAction.LOGIN_LOCKED, Map.of("step", "mfa"));
-            return tooManyAttempts(locked.get());
+            return tooManyAttempts(attempt.blockedFor().get());
         }
         Optional<MfaService.Method> method = mfaService.verify(user.getId(), request.code());
         if (method.isEmpty()) {
-            throttle.recordFailure(user.getEmail(), ip);
             audit.recordAs(user, AuditAction.MFA_FAILURE, Outcome.FAILURE, null);
             return error(HttpStatus.UNAUTHORIZED, "Invalid verification code");
         }
         if (method.get() == MfaService.Method.RECOVERY_CODE) {
             audit.recordAs(user, AuditAction.RECOVERY_CODE_USED, Outcome.SUCCESS, null);
         }
-        return openSession(user, http, null, method.get() == MfaService.Method.TOTP ? "totp" : "recovery_code");
+        return openSession(user, http, null,
+                method.get() == MfaService.Method.TOTP ? "totp" : "recovery_code", attempt);
     }
 
     /** Primeiro passo do cadastro do 2FA: gera o segredo (pendente) para o QR code / chave manual. */
@@ -196,10 +195,10 @@ public class AuthController {
         }
         User user = found.get();
 
-        Optional<Duration> locked = throttle.lockedFor(user.getEmail(), ip);
-        if (locked.isPresent()) {
+        LoginThrottle.Attempt attempt = throttle.reserve(user.getEmail(), ip);
+        if (attempt.blockedFor().isPresent()) {
             audit.recordDeniedAs(user, AuditAction.LOGIN_LOCKED, Map.of("step", "mfa_setup"));
-            return tooManyAttempts(locked.get());
+            return tooManyAttempts(attempt.blockedFor().get());
         }
 
         List<String> recoveryCodes;
@@ -207,14 +206,15 @@ public class AuthController {
             recoveryCodes = mfaService.confirmSetup(user.getId(), request.code(), request.newPassword());
         } catch (MfaException e) {
             if (e.reason() == MfaException.Reason.INVALID_CODE) {
-                throttle.recordFailure(user.getEmail(), ip);
                 audit.recordAs(user, AuditAction.MFA_FAILURE, Outcome.FAILURE, Map.of("step", "setup"));
+            } else {
+                attempt.release(); // não foi um palpite de código
             }
             throw e;
         }
         User enrolled = users.findById(user.getId()).orElseThrow();
         audit.recordAs(enrolled, AuditAction.MFA_ENABLED, Outcome.SUCCESS, null);
-        return openSession(enrolled, http, recoveryCodes, "enrollment");
+        return openSession(enrolled, http, recoveryCodes, "enrollment", attempt);
     }
 
     // ───────────────────────────── refresh ─────────────────────────────
@@ -288,11 +288,12 @@ public class AuthController {
 
     /** Abre a sessão (login completo): zera o contador de falhas da conta e entrega os tokens. */
     private ResponseEntity<LoginResponseDTO> openSession(
-            User user, HttpServletRequest http, List<String> recoveryCodes, String method
+            User user, HttpServletRequest http, List<String> recoveryCodes, String method, LoginThrottle.Attempt attempt
     ) {
         RefreshTokenService.NewSession session = refreshTokenService.startSession(
                 user, http.getHeader(HttpHeaders.USER_AGENT), ClientInfo.ip(http)
         );
+        attempt.release();
         throttle.recordSuccess(user.getEmail());
         audit.recordAs(user, AuditAction.LOGIN_SUCCESS, Outcome.SUCCESS, Map.of("method", method));
 

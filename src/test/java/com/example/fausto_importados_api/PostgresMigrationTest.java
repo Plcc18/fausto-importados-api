@@ -11,7 +11,7 @@ import com.example.fausto_importados_api.repository.AuditLogRepository;
 import com.example.fausto_importados_api.repository.MfaRecoveryCodeRepository;
 import com.example.fausto_importados_api.repository.UserRepository;
 import com.example.fausto_importados_api.security.throttle.LoginThrottle;
-import org.junit.jupiter.api.AfterAll;
+import com.example.fausto_importados_api.support.TestPostgres;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,8 +21,6 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.DockerClientFactory;
-import org.testcontainers.containers.PostgreSQLContainer;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -34,7 +32,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Aplica TODAS as migrations do Flyway num PostgreSQL de verdade e deixa o Hibernate validar as entidades
@@ -44,49 +41,20 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * <p>Também confere, no banco real, as garantias de concorrência do 2FA (código de uso único, contador de
  * falhas).
  *
- * <p>De onde vem o banco:
- * <ul>
- *   <li>por padrão, um container (Testcontainers) — pulado se não houver Docker;</li>
- *   <li>ou um Postgres VAZIO já existente, informado por
- *       {@code -Dtest.postgres.url=jdbc:postgresql://localhost:5432/banco_vazio}
- *       (+ {@code -Dtest.postgres.user} e {@code -Dtest.postgres.password}). O Flyway cria as tabelas nele.</li>
- * </ul>
+ * <p>De onde vem o banco: ver {@link TestPostgres}. Sem Docker e sem banco externo, é pulado.
  */
 @SpringBootTest
 @ActiveProfiles("test")
 class PostgresMigrationTest {
 
-    private static final String EXTERNAL_URL = System.getProperty("test.postgres.url");
-    private static PostgreSQLContainer<?> container;
-
     @BeforeAll
     static void startDatabase() {
-        if (EXTERNAL_URL != null) {
-            return;
-        }
-        assumeTrue(DockerClientFactory.instance().isDockerAvailable(),
-                "Sem Docker e sem -Dtest.postgres.url: teste de migrations pulado");
-        container = new PostgreSQLContainer<>("postgres:16-alpine");
-        container.start();
-    }
-
-    @AfterAll
-    static void stopDatabase() {
-        if (container != null) {
-            container.stop();
-        }
+        TestPostgres.startOrSkip();
     }
 
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", () -> EXTERNAL_URL != null ? EXTERNAL_URL : container.getJdbcUrl());
-        registry.add("spring.datasource.username", () -> EXTERNAL_URL != null
-                ? System.getProperty("test.postgres.user", "postgres") : container.getUsername());
-        registry.add("spring.datasource.password", () -> EXTERNAL_URL != null
-                ? System.getProperty("test.postgres.password", "") : container.getPassword());
-        registry.add("spring.flyway.enabled", () -> "true");
-        registry.add("spring.flyway.locations", () -> "classpath:db/migration");
-        registry.add("spring.jpa.hibernate.ddl-auto", () -> "validate");
+        TestPostgres.register(registry);
     }
 
     @Autowired JdbcTemplate jdbc;
@@ -103,7 +71,7 @@ class PostgresMigrationTest {
         List<String> versions = jdbc.queryForList(
                 "select version from flyway_schema_history where success order by installed_rank", String.class);
 
-        assertThat(versions).containsExactly("1", "2", "3", "4", "5", "6", "7");
+        assertThat(versions).containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9");
     }
 
     @Test
@@ -170,7 +138,7 @@ class PostgresMigrationTest {
         MfaRecoveryCode code = new MfaRecoveryCode();
         code.setId(UUID.randomUUID());
         code.setUserId(u.getId());
-        code.setCodeHash("a".repeat(63) + UUID.randomUUID().toString().charAt(0));
+        code.setCodeHash((UUID.randomUUID().toString() + UUID.randomUUID()).replace("-", ""));
         code.setCreatedAt(Instant.now());
         recoveryCodes.saveAndFlush(code);
 
@@ -180,19 +148,17 @@ class PostgresMigrationTest {
     }
 
     @Test
-    void concurrentFailuresAreAllCounted_evenWhenTheyCreateTheRowAtTheSameTime() throws Exception {
+    void parallelAttemptsAreCountedOneByOne_andStopAtTheThreshold() throws Exception {
         String email = "paralelo-" + UUID.randomUUID() + "@test.com";
 
-        runConcurrently(12, () -> {
-            throttle.recordFailure(email, null);
-            return 0;
-        });
+        List<Boolean> allowed = runConcurrently(12, () -> throttle.reserve(email, null).blockedFor().isEmpty());
 
-        // 12 falhas contadas, sem perder nenhuma por corrida: bloqueio ativo (limite de 5)
+        // nenhuma contagem se perde por corrida: exatamente 5 passam (o limite) e a conta fica bloqueada
+        assertThat(allowed.stream().filter(Boolean::booleanValue)).hasSize(5);
         assertThat(throttle.lockedFor(email, null)).isPresent();
         Integer failures = jdbc.queryForObject(
                 "select failures from auth_throttle where throttle_key like 'a:%' order by updated_at desc limit 1", Integer.class);
-        assertThat(failures).isEqualTo(12);
+        assertThat(failures).isEqualTo(5);
     }
 
     // ───────────────────────────── helpers ─────────────────────────────

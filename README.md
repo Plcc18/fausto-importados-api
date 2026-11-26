@@ -197,6 +197,29 @@ segredos (chaves sensíveis em `details` viram `[redacted]`). Retenção: 1 ano 
 
 ---
 
+### Concorrência e consistência
+
+- **Transações**: READ COMMITTED com locks explícitos (`SELECT ... FOR UPDATE`), updates atômicos e constraints no
+  banco. Deadlock, erro de serialização e lock timeout (5 s) repetem a transação até 3 vezes, com backoff. Ordem de
+  locks: pedido → produtos por id; administradores → usuário → tokens e códigos.
+- **Estoque**: baixa atômica (`UPDATE ... WHERE stock_quantity >= ?`), tudo ou nada.
+- **Pedidos**: preços, nomes e total vêm do cadastro dos produtos; o que o cliente envia nesses campos é ignorado.
+- **Lock otimista**: `GET /api/product*` (autenticado como ADMIN) e `GET /api/user*` devolvem `version`. Envie-a no
+  PUT/PATCH; se o registro mudou (outra edição ou uma venda), a resposta é `409 { "code": "version_conflict" }`.
+  Opcional até `REQUIRE_VERSION=true`.
+- **Idempotency-Key** (16 a 100 caracteres; use um UUID novo por ação do usuário e repita-o nas novas tentativas):
+  `POST /api/orders`, `/api/orders/{id}/complete`, `/api/orders/{id}/cancel`, `/api/product`,
+  `/api/product/decrease-stock`, `/api/user`, `/api/user/{id}/reset-credentials`. A repetição devolve a resposta
+  original com `Idempotent-Replayed: true` (sem a senha temporária, que só aparece uma vez); a mesma chave com outro
+  corpo dá 422. Falhas não ficam guardadas. Vale por 1 dia. Opcional até `REQUIRE_IDEMPOTENCY_KEY=true`.
+- **Testes**: precisam de PostgreSQL. Com Docker ligado basta `./mvnw test`; sem Docker, aponte um banco descartável:
+  `./mvnw test -Dtest.postgres.url=jdbc:postgresql://localhost:5432/banco_de_teste -Dtest.postgres.user=postgres`.
+  Sem nenhum dos dois, os testes de concorrência são **pulados**.
+
+Antes de implantar, veja [docs/OPERATIONS.md](docs/OPERATIONS.md), seção 12.
+
+---
+
 ### Produtos
 
 | Método | Endpoint             | Descrição           | Acesso  |

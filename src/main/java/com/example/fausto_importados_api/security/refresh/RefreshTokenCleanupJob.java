@@ -1,6 +1,7 @@
 package com.example.fausto_importados_api.security.refresh;
 
 import com.example.fausto_importados_api.audit.AuditService;
+import com.example.fausto_importados_api.concurrency.IdempotencyService;
 import com.example.fausto_importados_api.security.throttle.LoginThrottle;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,8 +13,8 @@ import java.time.Clock;
 import java.time.Duration;
 
 /**
- * Limpeza diária: refresh tokens vencidos (inatividade ou limite absoluto), contadores de login parados e
- * registros de auditoria além da retenção ({@code security.audit.retention}, padrão 1 ano).
+ * Limpeza diária: refresh tokens vencidos (inatividade ou limite absoluto), contadores de login parados, chaves de
+ * idempotência vencidas e registros de auditoria além da retenção ({@code security.audit.retention}, padrão 1 ano).
  */
 @Component
 public class RefreshTokenCleanupJob {
@@ -23,6 +24,7 @@ public class RefreshTokenCleanupJob {
     private final RefreshTokenService service;
     private final LoginThrottle throttle;
     private final AuditService audit;
+    private final IdempotencyService idempotency;
     private final Clock clock;
     private final Duration auditRetention;
 
@@ -30,12 +32,14 @@ public class RefreshTokenCleanupJob {
             RefreshTokenService service,
             LoginThrottle throttle,
             AuditService audit,
+            IdempotencyService idempotency,
             Clock clock,
             @Value("${security.audit.retention:P365D}") Duration auditRetention
     ) {
         this.service = service;
         this.throttle = throttle;
         this.audit = audit;
+        this.idempotency = idempotency;
         this.clock = clock;
         this.auditRetention = auditRetention;
     }
@@ -49,6 +53,10 @@ public class RefreshTokenCleanupJob {
         int counters = throttle.purgeStale();
         if (counters > 0) {
             log.info("Contadores de login antigos removidos: {}", counters);
+        }
+        int keys = idempotency.purgeExpired();
+        if (keys > 0) {
+            log.info("Chaves de idempotência vencidas removidas: {}", keys);
         }
         int trail = audit.purgeOlderThan(clock.instant().minus(auditRetention));
         if (trail > 0) {

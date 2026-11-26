@@ -120,7 +120,8 @@ public class SecurityConfig {
         configuration.addAllowedHeader("*");
         configuration.setAllowCredentials(true);
         // Sem isto o navegador esconde estes cabeçalhos do front (origem diferente da API)
-        configuration.setExposedHeaders(List.of("Retry-After", "RateLimit-Limit", "RateLimit-Remaining", "RateLimit-Reset"));
+        configuration.setExposedHeaders(List.of(
+                "Retry-After", "RateLimit-Limit", "RateLimit-Remaining", "RateLimit-Reset", "Idempotent-Replayed"));
         allowedOrigins.all().forEach(configuration::addAllowedOrigin);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);

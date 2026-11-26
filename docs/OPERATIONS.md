@@ -19,6 +19,7 @@ O front (Vercel) só mostra telas: **quem decide é sempre a API**.
 9. [A chave `TOTP_ENCRYPTION_KEY`](#9-a-chave-totp_encryption_key)
 10. [Auditoria](#10-auditoria)
 11. [Backup e restauração](#11-backup-e-restauração)
+12. [Concorrência: implantação e ajustes](#12-concorrência-implantação-e-ajustes)
 
 ---
 
@@ -278,3 +279,39 @@ confere as migrations). A restauração usa `--clean`: **apaga e recria** os obj
 
 Backup só vale se restaura. Restaure o backup mais recente num banco novo, suba a API local apontando para ele e confira
 que você entra, que `GET /api/product` lista os produtos e que `audit_log` tem registros recentes. Anote a data.
+
+---
+
+## 12. Concorrência: implantação e ajustes
+
+### Antes de implantar a versão com as migrations V8 e V9
+
+1. Faça um backup (seção 11).
+2. Rode as consultas de conferência (só leitura) no banco de produção:
+
+   ```bash
+   psql "$DATABASE_URL" -f scripts/preflight-constraints.sql
+   ```
+
+3. Corrija o que aparecer:
+   - consultas **1 e 2** (e-mails ou produtos ativos repetidos) **impedem** a implantação: a V9 aborta com a lista e a
+     versão anterior continua no ar;
+   - consultas **3 a 7** não impedem: a regra passa a valer para escritas novas e a V9 registra um `WARNING`. Atenção:
+     qualquer alteração numa linha que continua fora da regra é recusada (ex.: não dá para vender um produto com
+     `original_price = 0`), então corrija as das consultas 3 e 4. Depois, valide:
+     `ALTER TABLE <tabela> VALIDATE CONSTRAINT <nome>;`
+
+Durante a troca de versão, a instância antiga pode falhar ao renovar sessões por alguns segundos (a regra de um
+refresh token vivo por sessão já vale no banco). O front tenta de novo ou pede login.
+
+### Ajustes
+
+| Variável | Padrão | Para quê |
+|---|---|---|
+| `REQUIRE_IDEMPOTENCY_KEY` | `false` | Recusa (400) as rotas POST sensíveis sem `Idempotency-Key`. Ligue **depois** que o front enviar o cabeçalho. |
+| `REQUIRE_VERSION` | `false` | Recusa (428) edições de produto e de conta sem `version`. Ligue **depois** que o front enviar o campo. |
+| `DB_CONNECTION_INIT_SQL` | `SET lock_timeout = '5s'` | Executado em cada conexão nova do banco. |
+
+No log, `Transação repetida` indica um deadlock ou lock timeout resolvido sozinho; `Operação desistiu por contenção`
+indica que as 3 tentativas falharam (o cliente recebeu 409). Se forem frequentes, há uma transação presa:
+consulte `pg_stat_activity`.

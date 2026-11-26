@@ -1,7 +1,9 @@
 package com.example.fausto_importados_api.security.mfa;
 
+import com.example.fausto_importados_api.concurrency.Transactions;
 import com.example.fausto_importados_api.model.MfaRecoveryCode;
 import com.example.fausto_importados_api.repository.MfaRecoveryCodeRepository;
+import com.example.fausto_importados_api.repository.UserRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,11 +32,17 @@ public class RecoveryCodeService {
     private static final char[] ALPHABET = ALPHABET_TEXT.toCharArray();
 
     private final MfaRecoveryCodeRepository repository;
+    private final UserRepository users;
+    private final Transactions transactions;
     private final Clock clock;
     private final SecureRandom random = new SecureRandom();
 
-    public RecoveryCodeService(MfaRecoveryCodeRepository repository, Clock clock) {
+    public RecoveryCodeService(
+            MfaRecoveryCodeRepository repository, UserRepository users, Transactions transactions, Clock clock
+    ) {
         this.repository = repository;
+        this.users = users;
+        this.transactions = transactions;
         this.clock = clock;
     }
 
@@ -42,24 +50,27 @@ public class RecoveryCodeService {
      * Gera um conjunto novo (descartando o anterior). Os códigos em claro só existem no retorno desta chamada.
      * Formato exibido: {@code XXXX-XXXX-XXXX-XXXX}.
      */
-    @Transactional
     public List<String> generate(UUID userId) {
-        repository.deleteAllByUser(userId);
-        List<String> display = new ArrayList<>(COUNT);
-        List<MfaRecoveryCode> rows = new ArrayList<>(COUNT);
-        for (int i = 0; i < COUNT; i++) {
-            String code = randomCode();
-            display.add(format(code));
+        return transactions.run(() -> {
+            // travado: duas gerações simultâneas não deixam dois conjuntos válidos
+            users.findByIdForUpdate(userId);
+            repository.deleteAllByUser(userId);
+            List<String> display = new ArrayList<>(COUNT);
+            List<MfaRecoveryCode> rows = new ArrayList<>(COUNT);
+            for (int i = 0; i < COUNT; i++) {
+                String code = randomCode();
+                display.add(format(code));
 
-            MfaRecoveryCode row = new MfaRecoveryCode();
-            row.setId(UUID.randomUUID());
-            row.setUserId(userId);
-            row.setCodeHash(hash(code));
-            row.setCreatedAt(clock.instant());
-            rows.add(row);
-        }
-        repository.saveAll(rows);
-        return display;
+                MfaRecoveryCode row = new MfaRecoveryCode();
+                row.setId(UUID.randomUUID());
+                row.setUserId(userId);
+                row.setCodeHash(hash(code));
+                row.setCreatedAt(clock.instant());
+                rows.add(row);
+            }
+            repository.saveAll(rows);
+            return display;
+        });
     }
 
     /** Usa o código, se for válido e ainda não usado. Atômico: dois usos simultâneos, só um passa. */

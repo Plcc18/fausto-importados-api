@@ -47,5 +47,8 @@ public record ProductRequestDTO(
 
         @NotNull(message = "Stock quantity is mandatory")
         @Min(value = 0, message = "Stock quantity cannot be negative")
-        Integer stockQuantity
+        Integer stockQuantity,
+
+        // Versão lida pelo painel antes de editar (ignorada na criação)
+        Long version
 ) {}

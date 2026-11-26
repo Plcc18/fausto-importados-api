@@ -3,14 +3,18 @@ package com.example.fausto_importados_api.controller;
 import com.example.fausto_importados_api.audit.AuditAction;
 import com.example.fausto_importados_api.audit.AuditDiff;
 import com.example.fausto_importados_api.audit.AuditService;
+import com.example.fausto_importados_api.concurrency.IdempotencyService;
+import com.example.fausto_importados_api.concurrency.Transactions;
 import com.example.fausto_importados_api.dto.auth.ProductRequestDTO;
 import com.example.fausto_importados_api.dto.auth.ProductResponseDTO;
 import com.example.fausto_importados_api.dto.auth.ProductUpdateDTO;
 import com.example.fausto_importados_api.mapper.ProductMapper;
 import com.example.fausto_importados_api.model.Product;
+import com.example.fausto_importados_api.model.User;
 import com.example.fausto_importados_api.model.enums.Category;
 import com.example.fausto_importados_api.services.ProductService;
 import com.example.fausto_importados_api.services.exception.InvalidProductException;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.ConstraintViolation;
@@ -24,6 +28,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -32,6 +37,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.SortedMap;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -51,6 +58,12 @@ public class ProductController {
     @Autowired
     private Validator validator;
 
+    @Autowired
+    private IdempotencyService idempotency;
+
+    @Autowired
+    private Transactions transactions;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     // DTO para decrementar estoque de múltiplos produtos de uma vez
@@ -63,39 +76,41 @@ public class ProductController {
     // GETs públicos
     // ======================
     @GetMapping
-    public ResponseEntity<Page<ProductResponseDTO>> getAllActiveProducts(@PageableDefault(size = 2000) Pageable pageable) {
-        Page<ProductResponseDTO> products = productService.findAllActive(pageable).map(productMapper::toResponseDTO);
-        return ResponseEntity.ok(products);
+    public ResponseEntity<Page<ProductResponseDTO>> getAllActiveProducts(
+            @PageableDefault(size = 2000) Pageable pageable, @AuthenticationPrincipal User user
+    ) {
+        return ResponseEntity.ok(toPage(productService.findAllActive(pageable), user));
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<ProductResponseDTO> getProduct(@PathVariable UUID id) {
+    public ResponseEntity<ProductResponseDTO> getProduct(@PathVariable UUID id, @AuthenticationPrincipal User user) {
         Product p = productService.findActiveById(id);
-        return ResponseEntity.ok(productMapper.toResponseDTO(p));
+        return ResponseEntity.ok(productMapper.toResponseDTO(p, isAdmin(user)));
     }
 
     @GetMapping("/featured")
-    public ResponseEntity<Page<ProductResponseDTO>> getFeaturedProducts(@PageableDefault(size = 2000) Pageable pageable) {
-        Page<ProductResponseDTO> products = productService.findFeatured(pageable).map(productMapper::toResponseDTO);
-        return ResponseEntity.ok(products);
+    public ResponseEntity<Page<ProductResponseDTO>> getFeaturedProducts(
+            @PageableDefault(size = 2000) Pageable pageable, @AuthenticationPrincipal User user
+    ) {
+        return ResponseEntity.ok(toPage(productService.findFeatured(pageable), user));
     }
 
     @GetMapping("/category/{category}")
     public ResponseEntity<Page<ProductResponseDTO>> getProductsByCategory(
             @PathVariable Category category,
-            @PageableDefault(size = 2000) Pageable pageable
+            @PageableDefault(size = 2000) Pageable pageable,
+            @AuthenticationPrincipal User user
     ) {
-        Page<ProductResponseDTO> products = productService.findByCategory(category, pageable).map(productMapper::toResponseDTO);
-        return ResponseEntity.ok(products);
+        return ResponseEntity.ok(toPage(productService.findByCategory(category, pageable), user));
     }
 
     @GetMapping("/olfactive-family/{olfactiveFamily}")
     public ResponseEntity<Page<ProductResponseDTO>> getProductsByOlfactiveFamily(
             @PathVariable String olfactiveFamily,
-            @PageableDefault(size = 2000) Pageable pageable
+            @PageableDefault(size = 2000) Pageable pageable,
+            @AuthenticationPrincipal User user
     ) {
-        Page<ProductResponseDTO> products = productService.findByOlfactiveFamily(olfactiveFamily, pageable).map(productMapper::toResponseDTO);
-        return ResponseEntity.ok(products);
+        return ResponseEntity.ok(toPage(productService.findByOlfactiveFamily(olfactiveFamily, pageable), user));
     }
 
     // ======================
@@ -103,30 +118,39 @@ public class ProductController {
     // ======================
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<ApiResponse> postProduct(
+    public ResponseEntity<?> postProduct(
+            @RequestHeader(value = IdempotencyService.HEADER, required = false) String idempotencyKey,
             @Valid @RequestBody ProductRequestDTO dto
     ) {
-        Product saved = productService.save(productMapper.toEntity(dto));
-        audit.recordSuccess(AuditAction.PRODUCT_CREATED, "PRODUCT", saved.getId(), AuditDiff.created(saved));
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(new ApiResponse(Instant.now().toString(), "Product created successfully"));
+        return idempotency.execute(idempotencyKey, "products.create", dto, () -> {
+            Product saved = productService.save(productMapper.toEntity(dto));
+            transactions.afterCommit(() -> audit.recordSuccess(
+                    AuditAction.PRODUCT_CREATED, "PRODUCT", saved.getId(), AuditDiff.created(saved)));
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .body(new ApiResponse(Instant.now().toString(), "Product created successfully"));
+        });
     }
 
     // ======================
-    // POST - Decrementar estoque ao finalizar pedido (público — chamado pelo frontend)
-    // Recebe uma lista de itens { productId, quantity } e decrementa cada um.
+    // POST - Decrementar estoque (ADMIN)
+    // Recebe uma lista de itens { productId, quantity } e decrementa todos ou nenhum.
     // ======================
     @PostMapping("/decrease-stock")
-    public ResponseEntity<ApiResponse> decreaseStock(
+    public ResponseEntity<?> decreaseStock(
+            @RequestHeader(value = IdempotencyService.HEADER, required = false) String idempotencyKey,
             @RequestBody List<StockDecreaseItem> items
     ) {
-        items.forEach(item -> productService.decreaseStock(item.productId(), item.quantity()));
-        audit.recordSuccess(AuditAction.STOCK_DECREASED, "PRODUCT", null, Map.of("items", items.stream()
-                .map(item -> Map.of("productId", String.valueOf(item.productId()), "quantity", item.quantity()))
-                .toList()));
-        return ResponseEntity.ok(
-                new ApiResponse(Instant.now().toString(), "Stock updated successfully")
-        );
+        SortedMap<UUID, Integer> quantities = quantitiesByProduct(items);
+        return idempotency.execute(idempotencyKey, "products.decrease-stock", items, () -> {
+            productService.decreaseStock(quantities);
+            transactions.afterCommit(() -> audit.recordSuccess(
+                    AuditAction.STOCK_DECREASED, "PRODUCT", null, Map.of("items", items.stream()
+                            .map(item -> Map.of("productId", String.valueOf(item.productId()), "quantity", item.quantity()))
+                            .toList())));
+            return ResponseEntity.ok(
+                    new ApiResponse(Instant.now().toString(), "Stock updated successfully")
+            );
+        });
     }
 
     // ======================
@@ -139,39 +163,31 @@ public class ProductController {
             @RequestPart("product") String productJson,
             @RequestPart(value = "image", required = false) MultipartFile file
     ) {
-        try {
-            Product existing = productService.findActiveById(id);
-            ProductRequestDTO dto = objectMapper.readValue(productJson, ProductRequestDTO.class);
+        ProductRequestDTO dto = parse(productJson);
 
-            // @RequestPart não passa pelo @Valid do Spring — valida manualmente
-            Set<ConstraintViolation<ProductRequestDTO>> violations = validator.validate(dto);
-            if (!violations.isEmpty()) {
-                String message = violations.stream()
-                        .map(ConstraintViolation::getMessage)
-                        .collect(Collectors.joining("; "));
-                throw new InvalidProductException(message);
-            }
-
-            Map<String, Object> before = AuditDiff.product(existing);
-            productMapper.updateEntityFromRequest(existing, dto);
-
-            if (file != null && !file.isEmpty()) {
-                String imageUrl = productService.uploadImage(file);
-                existing.setImage(imageUrl);
-            }
-
-            productService.update(existing);
-            audit.recordSuccess(AuditAction.PRODUCT_UPDATED, "PRODUCT", id,
-                    Map.of("changes", AuditDiff.diff(before, AuditDiff.product(existing))));
-
-            return ResponseEntity.ok(
-                    new ApiResponse(Instant.now().toString(), "Product updated successfully")
-            );
-        } catch (InvalidProductException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new RuntimeException("Erro ao atualizar produto", e);
+        // @RequestPart não passa pelo @Valid do Spring — valida manualmente
+        Set<ConstraintViolation<ProductRequestDTO>> violations = validator.validate(dto);
+        if (!violations.isEmpty()) {
+            String message = violations.stream()
+                    .map(ConstraintViolation::getMessage)
+                    .collect(Collectors.joining("; "));
+            throw new InvalidProductException(message);
         }
+
+        // O upload é lento e externo: acontece antes (e fora) da transação que grava o produto
+        String imageUrl = null;
+        if (file != null && !file.isEmpty()) {
+            productService.checkEditable(id, dto.version());
+            imageUrl = productService.uploadImage(file);
+        }
+
+        ProductService.Change change = productService.replace(id, dto, imageUrl);
+        audit.recordSuccess(AuditAction.PRODUCT_UPDATED, "PRODUCT", id,
+                Map.of("changes", AuditDiff.diff(change.before(), AuditDiff.product(change.product()))));
+
+        return ResponseEntity.ok(
+                new ApiResponse(Instant.now().toString(), "Product updated successfully")
+        );
     }
 
     // ======================
@@ -183,27 +199,55 @@ public class ProductController {
             @PathVariable UUID id,
             @Valid @RequestBody ProductUpdateDTO dto
     ) {
-        Product updated = productService.updatePartial(id, dto);
+        Product updated = productService.updatePartial(id, dto).product();
         Map<String, Object> requested = new LinkedHashMap<>();
         objectMapper.convertValue(dto, new TypeReference<Map<String, Object>>() {})
                 .forEach((field, value) -> {
-                    if (value != null) requested.put(field, value);
+                    if (value != null && !field.equals("version")) requested.put(field, value);
                 });
         audit.recordSuccess(AuditAction.PRODUCT_UPDATED, "PRODUCT", id, Map.of("requested", requested));
-        return ResponseEntity.ok(productMapper.toResponseDTO(updated));
+        return ResponseEntity.ok(productMapper.toResponseDTO(updated, true));
     }
 
     // ======================
-    // DELETE - Deletar produto
+    // DELETE - Desativar produto (exclusão lógica)
     // ======================
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse> deleteProduct(@PathVariable UUID id) {
-        Product product = productService.findActiveById(id);
-        productService.delete(id);
+        Product product = productService.delete(id);
         audit.recordSuccess(AuditAction.PRODUCT_DELETED, "PRODUCT", id, AuditDiff.created(product));
         return ResponseEntity.ok(
                 new ApiResponse(Instant.now().toString(), "Product deleted successfully")
         );
+    }
+
+    // ───────────────────────────── internos ─────────────────────────────
+
+    private Page<ProductResponseDTO> toPage(Page<Product> products, User user) {
+        boolean admin = isAdmin(user);
+        return products.map(product -> productMapper.toResponseDTO(product, admin));
+    }
+
+    private static boolean isAdmin(User user) {
+        return user != null && user.isAdmin();
+    }
+
+    private ProductRequestDTO parse(String productJson) {
+        try {
+            return objectMapper.readValue(productJson, ProductRequestDTO.class);
+        } catch (JsonProcessingException e) {
+            throw new InvalidProductException("Invalid product data");
+        }
+    }
+
+    /** Soma itens repetidos; a ordem por id é a ordem em que os produtos são travados. */
+    private static SortedMap<UUID, Integer> quantitiesByProduct(List<StockDecreaseItem> items) {
+        if (items.isEmpty() || items.size() > 100 || items.stream().anyMatch(item -> item == null
+                || item.productId() == null || item.quantity() <= 0 || item.quantity() > 100_000)) {
+            throw new InvalidProductException("Each item needs a productId and a quantity greater than zero");
+        }
+        return items.stream().collect(Collectors.toMap(
+                StockDecreaseItem::productId, StockDecreaseItem::quantity, Math::addExact, TreeMap::new));
     }
 }

@@ -4,4 +4,4 @@ import com.example.fausto_importados_api.model.enums.Role;
 
 import java.util.UUID;
 
-public record UserResponseDTO(UUID id, String email, Role role, boolean active, boolean mfaEnabled) {}
+public record UserResponseDTO(UUID id, String email, Role role, boolean active, boolean mfaEnabled, Long version) {}

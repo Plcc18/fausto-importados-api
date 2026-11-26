@@ -1,22 +1,28 @@
 package com.example.fausto_importados_api.services;
 
+import com.example.fausto_importados_api.concurrency.Transactions;
+import com.example.fausto_importados_api.dto.CreateOrderDTO;
 import com.example.fausto_importados_api.dto.SalesStatsDTO;
+import com.example.fausto_importados_api.mapper.OrderMapper;
 import com.example.fausto_importados_api.model.Order;
 import com.example.fausto_importados_api.model.OrderItem;
 import com.example.fausto_importados_api.model.Product;
 import com.example.fausto_importados_api.model.enums.OrderStatus;
 import com.example.fausto_importados_api.repository.OrderRepository;
 import com.example.fausto_importados_api.services.exception.InsufficientStockException;
+import com.example.fausto_importados_api.services.exception.InvalidOrderException;
 import com.example.fausto_importados_api.services.exception.InvalidOrderStatusException;
 import com.example.fausto_importados_api.services.exception.OrderNotFoundException;
+import org.hibernate.Hibernate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.SortedMap;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -26,15 +32,35 @@ public class OrderService {
 
     private final OrderRepository orderRepository;
     private final ProductService productService;
+    private final OrderMapper orderMapper;
+    private final Transactions transactions;
 
-    public OrderService(OrderRepository orderRepository, ProductService productService) {
+    public OrderService(
+            OrderRepository orderRepository,
+            ProductService productService,
+            OrderMapper orderMapper,
+            Transactions transactions
+    ) {
         this.orderRepository = orderRepository;
         this.productService = productService;
+        this.orderMapper = orderMapper;
+        this.transactions = transactions;
     }
 
-    @Transactional
-    public Order createOrder(Order order) {
-        return orderRepository.save(order);
+    /**
+     * Cria um pedido PENDING. Nomes, preços e total vêm do cadastro dos produtos, nunca do cliente; do pedido
+     * recebido valem o produto, a quantidade e os dados de contato.
+     */
+    public Order createOrder(CreateOrderDTO dto) {
+        return transactions.run(() -> {
+            List<UUID> ids = dto.items().stream().map(CreateOrderDTO.ItemDTO::productId).distinct().toList();
+            Map<UUID, Product> products = productService.findAllActiveByIds(ids).stream()
+                    .collect(Collectors.toMap(Product::getId, Function.identity()));
+            if (products.size() != ids.size()) {
+                throw new InvalidOrderException("Um dos produtos do pedido não está mais disponível.");
+            }
+            return orderRepository.saveAndFlush(orderMapper.toEntity(dto, products));
+        });
     }
 
     // For notifications panel — shows all orders regardless of hidden flags
@@ -57,55 +83,44 @@ public class OrderService {
         return orderRepository.findByStatusAndHiddenFromReportFalseOrderByCreatedAtDesc(OrderStatus.COMPLETED);
     }
 
-    @Transactional
+    /**
+     * Conclui o pedido e baixa o estoque, tudo ou nada. O pedido fica travado (um segundo clique espera e encontra
+     * o status já alterado) e cada baixa é um update atômico, em ordem de id de produto.
+     */
     public Order complete(UUID orderId) {
-        Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new OrderNotFoundException("Order not found"));
+        return transactions.run(() -> {
+            Order order = lockPending(orderId, "Only PENDING orders can be completed");
 
-        if (order.getStatus() != OrderStatus.PENDING)
-            throw new InvalidOrderStatusException("Only PENDING orders can be completed");
+            // Soma as quantidades por produto (caso o mesmo produto apareça em mais de um item)
+            SortedMap<UUID, Integer> quantities = order.getItems().stream()
+                    .collect(Collectors.toMap(
+                            OrderItem::getProductId, OrderItem::getQuantity, Math::addExact, TreeMap::new));
 
-        // Soma as quantidades por produto (caso o mesmo produto apareça em mais de um item)
-        Map<UUID, Integer> quantitiesByProductId = order.getItems().stream()
-                .collect(Collectors.toMap(OrderItem::getProductId, OrderItem::getQuantity, Integer::sum));
+            quantities.forEach((productId, quantity) -> {
+                if (quantity <= 0) {
+                    throw new InvalidOrderException("O pedido tem um item com quantidade inválida.");
+                }
+                if (!productService.tryDecreaseStock(productId, quantity)) {
+                    throw insufficientStock(order, productId, quantity);
+                }
+            });
 
-        // Busca todos os produtos numa única query, em vez de uma consulta por item (N+1)
-        Map<UUID, Product> productsById = productService.findAllActiveByIds(quantitiesByProductId.keySet()).stream()
-                .collect(Collectors.toMap(Product::getId, Function.identity()));
-
-        order.getItems().forEach(item -> {
-            Product product = productsById.get(item.getProductId());
-            int available = product == null || product.getStockQuantity() == null ? 0 : product.getStockQuantity();
-
-            if (available < item.getQuantity()) {
-                throw new InsufficientStockException(
-                        "Estoque insuficiente para \"" + item.getProductName() + "\" (" + item.getProductSize() + "ml). " +
-                                "Disponível: " + available + " | Pedido: " + item.getQuantity()
-                );
-            }
+            order.setStatus(OrderStatus.COMPLETED);
+            return orderRepository.save(order);
         });
-
-        productService.decreaseStockBatch(quantitiesByProductId);
-
-        order.setStatus(OrderStatus.COMPLETED);
-        return orderRepository.save(order);
     }
 
-    @Transactional
     public Order cancel(UUID orderId) {
-        Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new OrderNotFoundException("Order not found"));
-
-        if (order.getStatus() != OrderStatus.PENDING)
-            throw new InvalidOrderStatusException("Only PENDING orders can be cancelled");
-
-        order.setStatus(OrderStatus.CANCELLED);
-        return orderRepository.save(order);
+        return transactions.run(() -> {
+            Order order = lockPending(orderId, "Only PENDING orders can be cancelled");
+            Hibernate.initialize(order.getItems()); // a resposta é montada fora da transação
+            order.setStatus(OrderStatus.CANCELLED);
+            return orderRepository.save(order);
+        });
     }
 
-    @Transactional
     public void clearHistory() {
-        orderRepository.hideCompletedAndCancelledFromNotifications();
+        transactions.execute(orderRepository::hideCompletedAndCancelledFromNotifications);
     }
 
     // Sales stats for admin panel — only orders visible in panel
@@ -132,14 +147,30 @@ public class OrderService {
     }
 
     // Reset panel stats — hides from panel only, report keeps its data
-    @Transactional
     public void resetSales() {
-        orderRepository.hideCompletedFromPanel();
+        transactions.execute(orderRepository::hideCompletedFromPanel);
     }
 
     // Reset report — hides from report only, panel keeps its data
-    @Transactional
     public void resetReport() {
-        orderRepository.hideCompletedFromReport();
+        transactions.execute(orderRepository::hideCompletedFromReport);
+    }
+
+    private Order lockPending(UUID orderId, String notPendingMessage) {
+        Order order = orderRepository.findByIdForUpdate(orderId)
+                .orElseThrow(() -> new OrderNotFoundException("Order not found"));
+        if (order.getStatus() != OrderStatus.PENDING) {
+            throw new InvalidOrderStatusException(notPendingMessage);
+        }
+        return order;
+    }
+
+    private InsufficientStockException insufficientStock(Order order, UUID productId, int quantity) {
+        OrderItem item = order.getItems().stream()
+                .filter(i -> i.getProductId().equals(productId))
+                .findFirst().orElseThrow();
+        return new InsufficientStockException(
+                "Estoque insuficiente para \"" + item.getProductName() + "\" (" + item.getProductSize() + "ml). " +
+                        "Disponível: " + productService.availableStock(productId) + " | Pedido: " + quantity);
     }
 }

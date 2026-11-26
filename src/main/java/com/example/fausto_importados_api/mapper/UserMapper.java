@@ -9,6 +9,6 @@ public class UserMapper {
 
     public UserResponseDTO toResponseDTO(User user) {
         return new UserResponseDTO(
-                user.getId(), user.getEmail(), user.getRole(), user.getActive(), user.isTotpEnabled());
+                user.getId(), user.getEmail(), user.getRole(), user.getActive(), user.isTotpEnabled(), user.getVersion());
     }
 }

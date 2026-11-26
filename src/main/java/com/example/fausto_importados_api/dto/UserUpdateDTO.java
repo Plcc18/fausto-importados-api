@@ -9,5 +9,8 @@ public record UserUpdateDTO(
         @NotBlank(message = "Email is mandatory!")
         @Email(message = "Email is invalid!")
         @Size(max = 150)
-        String email
+        String email,
+
+        // Versão lida pelo painel antes de editar
+        Long version
 ) {}

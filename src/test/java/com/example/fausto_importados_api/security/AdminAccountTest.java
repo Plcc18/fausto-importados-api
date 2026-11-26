@@ -238,7 +238,7 @@ class AdminAccountTest {
                 });
         assertThat(users.countByRoleAndActiveTrue(Role.ADMIN)).isEqualTo(1);
 
-        assertThatThrownBy(() -> accounts.setActive(only.getId(), false))
+        assertThatThrownBy(() -> accounts.setActive(only.getId(), false, null))
                 .isInstanceOf(AccountConflictException.class).hasMessageContaining("last active administrator");
         assertThatThrownBy(() -> accounts.delete(only.getId()))
                 .isInstanceOf(AccountConflictException.class).hasMessageContaining("last active administrator");

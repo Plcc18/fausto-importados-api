@@ -7,6 +7,9 @@ spring:
     url: "jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1"
     username: sa
     password: ""
+    hikari:
+      # lock_timeout e do PostgreSQL; os testes com Postgres o definem (ver TestPostgres)
+      connection-init-sql: "SELECT 1"
 
   # Schema gerado pelo Hibernate a partir das entities (as migrations do Flyway são específicas do Postgres)
   flyway:

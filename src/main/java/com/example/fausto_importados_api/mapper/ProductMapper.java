@@ -50,7 +50,8 @@ public class ProductMapper {
         if (dto.getStockQuantity() != null) product.setStockQuantity(dto.getStockQuantity());
     }
 
-    public ProductResponseDTO toResponseDTO(Product product) {
-        return ProductResponseDTO.fromProduct(product);
+    /** @param admin inclui {@code stockQuantity} e {@code version}, que só o painel precisa */
+    public ProductResponseDTO toResponseDTO(Product product, boolean admin) {
+        return ProductResponseDTO.fromProduct(product, admin);
     }
 }
