@@ -20,6 +20,8 @@ No PowerShell use `.\mvnw.cmd` e coloque cada `-D...` entre aspas.
 
 A configuração vem de variáveis de ambiente, ou de um arquivo `.env` na raiz (ver `.env.example`). `TOTP_ENCRYPTION_KEY` é obrigatória para a API subir.
 
+Produção: API no Render e banco na Neon. O `DB_URL` usa a conexão direta (sem `-pooler`). Trate push na `main` como deploy em produção: o Flyway migra o banco quando a API sobe.
+
 ## Testes e banco
 
 - A maioria dos testes roda em H2, com o schema gerado pelas entidades (Flyway desligado).
@@ -40,7 +42,7 @@ Camadas em `com.example.fausto_importados_api`: `controller` → `services` → 
 ### Escrita no banco
 - Use `Transactions.run` / `execute`: READ COMMITTED com repetição em deadlock e lock timeout. O bloco pode executar mais de uma vez, não faz chamada externa lenta (Cloudinary) e deixa a auditoria para `afterCommit`. Respeite a ordem de locks documentada na classe.
 - Edições usam lock otimista (`@Version` + `Versions.check`). POSTs sensíveis passam por `IdempotencyService`.
-- `REQUIRE_VERSION` e `REQUIRE_IDEMPOTENCY_KEY` ficam `false` enquanto o front não enviar esses dados.
+- `REQUIRE_VERSION` e `REQUIRE_IDEMPOTENCY_KEY` estão ligadas em produção (o padrão no código é `false`). Edição nova precisa conferir a `version` e POST sensível novo precisa aceitar `Idempotency-Key`, com o front enviando o dado.
 
 ### Auditoria, erros e tempo
 - Toda operação administrativa registra um `AuditAction` pelo `AuditService`; antes e depois de produtos vêm de `AuditDiff`.

@@ -5,7 +5,7 @@ name: Database backup
 # Configuração e restauração: docs/OPERATIONS.md ("Backup e restauração").
 #
 # Secrets do repositório:
-#   BACKUP_DATABASE_URL     URL EXTERNA do banco no Render (postgres://usuario:senha@host/banco?sslmode=require)
+#   BACKUP_DATABASE_URL     URL DIRETA do banco na Neon, sem -pooler (postgres://usuario:senha@host/banco?sslmode=require)
 #   BACKUP_GPG_PUBLIC_KEY   chave pública GnuPG em texto (gpg --armor --export <fingerprint>)
 
 on:

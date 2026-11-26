@@ -1,6 +1,7 @@
 # Operação — administradores, 2FA, auditoria e backup
 
-Guia para quem opera o Fausto Importados (2 ou 3 administradores). Tudo aqui vale para a API (Render) e o PostgreSQL.
+Guia para quem opera o Fausto Importados (2 ou 3 administradores). Tudo aqui vale para a API (Render) e o PostgreSQL
+(Neon).
 O front (Vercel) só mostra telas: **quem decide é sempre a API**.
 
 > Convenções dos exemplos: `API` é a URL da API (ex.: `https://fausto-importados-api.onrender.com`). Os comandos usam
@@ -27,12 +28,14 @@ O front (Vercel) só mostra telas: **quem decide é sempre a API**.
 
 | Variável | Onde | Para quê |
 |---|---|---|
+| `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` | Render | Banco na Neon. Use o endereço **direto** (sem `-pooler`): a API executa `SET lock_timeout` em cada conexão e o Flyway migra por essa mesma URL, e a conexão com pool da Neon não é indicada para nenhum dos dois. |
 | `TOTP_ENCRYPTION_KEY` | Render | **Obrigatória.** Chave AES-256 (base64, 32 bytes) que cifra os segredos do 2FA. A API não sobe sem ela. |
 | `JWT_SECRET` | Render | Assina os tokens de acesso. |
 | `FRONTEND_URL` | Render | Origem(ns) do front (CORS e verificação de `Origin` no refresh). |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Render | **Só** para criar o primeiro admin. Remova depois do primeiro login. |
 | `SPRING_PROFILES_ACTIVE=prod` | Render | Perfil de produção (`application-prod.yml`: logs enxutos, escuta em `0.0.0.0`). Recomendado. Os cookies de sessão já são `Secure`/`SameSite=Strict` por padrão e o SQL/DEBUG de segurança só aparecem no perfil `dev`. |
 | `BACKUP_DATABASE_URL`, `BACKUP_GPG_PUBLIC_KEY` | GitHub (secrets) | Só para o backup diário (seção 11). |
+| `REQUIRE_IDEMPOTENCY_KEY`, `REQUIRE_VERSION` | Render | `true` em produção (seção 12). |
 
 Gerar a chave do 2FA: `openssl rand -base64 32`. **Guarde uma cópia fora do Render** (gerenciador de senhas).
 
@@ -78,6 +81,7 @@ Cada pessoa tem a **própria** conta. Ninguém define a senha de outra pessoa: o
 
 ```bash
 curl -s -X POST "$API/api/user" -H "Authorization: Bearer $TOKEN" -H "X-Reauth: $PROOF" \
+  -H "Idempotency-Key: $(openssl rand -hex 16)" \
   -H 'Content-Type: application/json' -d '{"email":"nova.pessoa@exemplo.com"}' | jq
 # => { "id": "...", "email": "...", "temporaryPassword": "Xk7...", "enrollmentExpiresAt": "..." }
 ```
@@ -94,10 +98,12 @@ curl -s -X POST "$API/api/user" -H "Authorization: Bearer $TOKEN" -H "X-Reauth: 
 
 ```bash
 ID=<uuid da conta>   # veja em GET /api/user
+# versão atual da conta (obrigatória; muda a cada alteração, então leia de novo antes de cada comando)
+VERSION=$(curl -s "$API/api/user" -H "Authorization: Bearer $TOKEN" | jq --arg id "$ID" '.[] | select(.id == $id) | .version')
 # desativar: encerra TODAS as sessões na hora e bloqueia o login
 curl -s -X PATCH "$API/api/user/$ID/active" -H "Authorization: Bearer $TOKEN" -H "X-Reauth: $PROOF" \
-  -H 'Content-Type: application/json' -d '{"active":false}'
-# reativar: {"active":true}
+  -H 'Content-Type: application/json' -d "{\"active\":false,\"version\":$VERSION}"
+# reativar: leia a VERSION de novo e repita o comando com "active":true
 # excluir (prefira desativar; some junto sessões e códigos de recuperação)
 curl -s -X DELETE "$API/api/user/$ID" -H "Authorization: Bearer $TOKEN" -H "X-Reauth: $PROOF"
 ```
@@ -111,7 +117,8 @@ pode ser desativado ou excluído (`409`).
 **Situação mais comum — outro administrador resolve** (a pessoa perdeu o aparelho, ou esqueceu a senha):
 
 ```bash
-curl -s -X POST "$API/api/user/$ID/reset-credentials" -H "Authorization: Bearer $TOKEN" -H "X-Reauth: $PROOF" | jq
+curl -s -X POST "$API/api/user/$ID/reset-credentials" -H "Authorization: Bearer $TOKEN" -H "X-Reauth: $PROOF" \
+  -H "Idempotency-Key: $(openssl rand -hex 16)" | jq
 # => nova temporaryPassword (mostrada uma vez) + prazo de 24 h
 ```
 
@@ -130,8 +137,8 @@ Os códigos antigos deixam de valer. **Trocar a própria senha:** `POST /auth/pa
 ## 7. Emergência: nenhum administrador consegue entrar
 
 Só se **todos** perderam o 2FA e os códigos (ou há um único admin). Faça direto no banco — é o único caminho sem outro
-admin. Use `psql` com a URL externa do banco (o `\set` abaixo é do `psql`; em outro cliente SQL, troque `:'email'` pelo
-e-mail entre aspas simples). **Aja rápido:** enquanto a conta está sem 2FA, quem souber a senha consegue cadastrar o
+admin. Use `psql` com a URL direta do banco (painel da Neon, **Connect**, com *Connection pooling* desligado). O `\set`
+abaixo é do `psql`; em outro cliente, como o SQL Editor da Neon, troque `:'email'` pelo e-mail entre aspas simples. **Aja rápido:** enquanto a conta está sem 2FA, quem souber a senha consegue cadastrar o
 autenticador dela — por isso a janela é de 1 hora.
 
 ```sql
@@ -236,8 +243,8 @@ Um workflow do GitHub ([.github/workflows/db-backup.yml](../.github/workflows/db
 O dump contém hashes de senha, segredos de 2FA (cifrados) e dados de clientes (nome, WhatsApp, pedidos): por isso só o
 arquivo cifrado sai do runner e a chave **privada** nunca fica no GitHub nem no Render.
 
-> **Confira o plano do banco no Render.** Planos gratuitos costumam não ter backup gerenciado nem retenção longa (e o
-> banco pode expirar). Este backup independe disso, mas só protege o que já foi copiado: não deixe a rotina sem
+> **O banco fica na Neon, no plano Free.** A restauração para um momento anterior (*Backup & Restore*) cobre só as
+> últimas 6 horas. Este backup independe disso, mas só protege o que já foi copiado: não deixe a rotina sem
 > monitoramento.
 
 ### Configuração (uma vez)
@@ -253,9 +260,10 @@ gpg --armor --export-secret-keys "$FPR" > backup-PRIVADA.asc      # NUNCA suba e
 ```
 
 No GitHub (Settings → Secrets and variables → Actions) crie:
-`BACKUP_GPG_PUBLIC_KEY` (conteúdo de `backup-publica.asc`) e `BACKUP_DATABASE_URL` (URL **externa** do banco no Render,
-com `?sslmode=require`). Rode o workflow uma vez em *Actions → Database backup → Run workflow* e confira que terminou
-verde e que o artifact apareceu.
+`BACKUP_GPG_PUBLIC_KEY` (conteúdo de `backup-publica.asc`) e `BACKUP_DATABASE_URL` (URL **direta** do banco na Neon, sem
+`-pooler`, com `sslmode=require`: `pg_dump` não deve passar pelo pool). Rode o workflow uma vez em
+*Actions → Database backup → Run workflow* e confira que terminou verde e que o artifact apareceu. O `PG_MAJOR` do
+workflow (hoje 17) precisa ser igual ou maior que a versão do servidor.
 
 Avisos do GitHub: workflows agendados em repositório **público** são desativados após 60 dias sem atividade no repo, e
 a notificação de falha vai por e-mail para quem criou/editou o agendamento (se as notificações dele estiverem ligadas).
@@ -266,7 +274,7 @@ Mesmo assim, **olhe a aba Actions de vez em quando**.
 ```bash
 # 1) baixe o artifact (aba Actions → run → fausto-db-backup) e descompacte
 # 2) tenha a chave PRIVADA no gpg:  gpg --import backup-PRIVADA.asc
-# 3) crie um banco NOVO e VAZIO e restaure nele
+# 3) crie um banco NOVO e VAZIO (na Neon, pelo menu Databases ou com o createdb abaixo) e restaure nele
 createdb -h HOST -U USUARIO fausto_restaurado
 CONFIRM_RESTORE=yes scripts/db-restore.sh fausto-db-AAAAMMDDTHHMMSSZ.dump.gpg \
   "postgres://USUARIO:SENHA@HOST:5432/fausto_restaurado"
@@ -285,6 +293,9 @@ que você entra, que `GET /api/product` lista os produtos e que `audit_log` tem 
 ## 12. Concorrência: implantação e ajustes
 
 ### Antes de implantar a versão com as migrations V8 e V9
+
+> Já aplicadas em produção em 26/11/2026. O roteiro continua válido para outros ambientes com dados antigos. Na Neon,
+> dá para ensaiar migrations em uma branch criada a partir da produção, sem tocar nela.
 
 1. Faça um backup (seção 11).
 2. Rode as consultas de conferência (só leitura) no banco de produção:
@@ -306,15 +317,17 @@ refresh token vivo por sessão já vale no banco). O front tenta de novo ou pede
 
 ### Ajustes
 
-| Variável | Padrão | Para quê |
+| Variável | Padrão no código | Para quê |
 |---|---|---|
 | `REQUIRE_IDEMPOTENCY_KEY` | `false` | Recusa (400) as rotas POST sensíveis sem `Idempotency-Key`. Ligue **depois** que o front enviar o cabeçalho. |
 | `REQUIRE_VERSION` | `false` | Recusa (428) edições de produto e de conta sem `version`. Ligue **depois** que o front enviar o campo. |
 | `DB_CONNECTION_INIT_SQL` | `SET lock_timeout = '5s'` | Executado em cada conexão nova do banco. |
 
-Com as exigências ligadas, os comandos `curl` deste guia também precisam delas: acrescente
-`-H "Idempotency-Key: $(uuidgen)"` nos `POST` de criação e redefinição de contas (no Windows, qualquer texto único com
-16 ou mais caracteres) e o campo `"version"` (veja em `GET /api/user`) no corpo de `PUT` e `PATCH` de contas.
+**Em produção as duas exigências estão ligadas** desde 26/11/2026, com o front já enviando os dois dados. Se alguma
+tela passar a receber 400 ou 428, volte a variável para `false` no Render até corrigir.
+
+Por isso os comandos `curl` deste guia enviam `Idempotency-Key` (16 a 100 caracteres, única por operação) nos `POST` de
+criação e redefinição de contas, e `"version"` (veja em `GET /api/user`) no corpo de `PUT` e `PATCH` de contas.
 
 No log, `Transação repetida` indica um deadlock ou lock timeout resolvido sozinho; `Operação desistiu por contenção`
 indica que as 3 tentativas falharam (o cliente recebeu 409). Se forem frequentes, há uma transação presa:
