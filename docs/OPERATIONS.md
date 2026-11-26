@@ -312,6 +312,10 @@ refresh token vivo por sessão já vale no banco). O front tenta de novo ou pede
 | `REQUIRE_VERSION` | `false` | Recusa (428) edições de produto e de conta sem `version`. Ligue **depois** que o front enviar o campo. |
 | `DB_CONNECTION_INIT_SQL` | `SET lock_timeout = '5s'` | Executado em cada conexão nova do banco. |
 
+Com as exigências ligadas, os comandos `curl` deste guia também precisam delas: acrescente
+`-H "Idempotency-Key: $(uuidgen)"` nos `POST` de criação e redefinição de contas (no Windows, qualquer texto único com
+16 ou mais caracteres) e o campo `"version"` (veja em `GET /api/user`) no corpo de `PUT` e `PATCH` de contas.
+
 No log, `Transação repetida` indica um deadlock ou lock timeout resolvido sozinho; `Operação desistiu por contenção`
 indica que as 3 tentativas falharam (o cliente recebeu 409). Se forem frequentes, há uma transação presa:
 consulte `pg_stat_activity`.

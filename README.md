@@ -207,6 +207,8 @@ segredos (chaves sensíveis em `details` viram `[redacted]`). Retenção: 1 ano 
 - **Lock otimista**: `GET /api/product*` (autenticado como ADMIN) e `GET /api/user*` devolvem `version`. Envie-a no
   PUT/PATCH; se o registro mudou (outra edição ou uma venda), a resposta é `409 { "code": "version_conflict" }`.
   Opcional até `REQUIRE_VERSION=true`.
+- **Catálogo**: `GET /api/product*` é público, mas com um token inválido, vencido ou revogado responde 401 (para o
+  front renovar a sessão em vez de receber a resposta sem `stockQuantity`).
 - **Idempotency-Key** (16 a 100 caracteres; use um UUID novo por ação do usuário e repita-o nas novas tentativas):
   `POST /api/orders`, `/api/orders/{id}/complete`, `/api/orders/{id}/cancel`, `/api/product`,
   `/api/product/decrease-stock`, `/api/user`, `/api/user/{id}/reset-credentials`. A repetição devolve a resposta

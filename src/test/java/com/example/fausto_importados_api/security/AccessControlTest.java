@@ -152,6 +152,20 @@ class AccessControlTest {
     }
 
     @Test
+    void theCatalogAnswers401ToATokenThatNoLongerWorks_soTheClientRenewsIt() throws Exception {
+        for (String path : new String[]{"/api/product", "/api/product/featured"}) {
+            assertThat(call("GET", path, null).getResponse().getStatus()).as(path).isEqualTo(200);
+            assertThat(call("GET", path, userToken).getResponse().getStatus()).as(path).isEqualTo(200);
+            assertThat(call("GET", path, adminToken).getResponse().getStatus()).as(path).isEqualTo(200);
+            assertThat(call("GET", path, adminToken + "x").getResponse().getStatus()).as(path).isEqualTo(401);
+        }
+
+        call("POST", "/auth/logout-all", userToken); // o token ainda não venceu, mas a sessão foi revogada
+
+        assertThat(call("GET", "/api/product", userToken).getResponse().getStatus()).isEqualTo(401);
+    }
+
+    @Test
     void apiResponsesCarrySecurityHeaders_andNeverCacheAuthenticatedData() throws Exception {
         MvcResult ok = call("GET", "/api/user", adminToken);
         MvcResult denied = call("GET", "/api/user", null);

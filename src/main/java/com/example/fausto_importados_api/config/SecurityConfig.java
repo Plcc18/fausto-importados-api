@@ -1,5 +1,6 @@
 package com.example.fausto_importados_api.config;
 
+import com.example.fausto_importados_api.model.User;
 import com.example.fausto_importados_api.security.jwt.JsonAccessDeniedHandler;
 import com.example.fausto_importados_api.security.jwt.JwtAuthenticationEntryPoint;
 import com.example.fausto_importados_api.security.jwt.JwtAuthenticationFilter;
@@ -13,6 +14,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authorization.AuthorizationDecision;
+import org.springframework.security.authorization.AuthorizationManager;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -23,6 +26,7 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.intercept.RequestAuthorizationContext;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -77,7 +81,9 @@ public class SecurityConfig {
                         .requestMatchers("/auth/login", "/auth/login/mfa", "/auth/mfa/setup", "/auth/mfa/setup/confirm",
                                 "/auth/refresh", "/auth/logout").permitAll()
                         .requestMatchers("/auth/me", "/auth/logout-all").authenticated()
-                        .requestMatchers(HttpMethod.GET, "/api/product/**").permitAll()
+                        // Catálogo público, mas um token que não vale mais recebe 401: com 200 o painel receberia a
+                        // resposta sem estoque e não saberia que precisa renovar a sessão
+                        .requestMatchers(HttpMethod.GET, "/api/product/**").access(anonymousOrValidToken())
                         .requestMatchers(HttpMethod.GET, "/api/image/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/user").hasRole("ADMIN")
                         .requestMatchers("/api/upload").hasRole("ADMIN")
@@ -93,6 +99,13 @@ public class SecurityConfig {
                         JwtAuthenticationFilter.class);
 
         return http.build();
+    }
+
+    /** Libera quem não envia token e quem envia um válido; token inválido, vencido ou revogado → 401. */
+    private static AuthorizationManager<RequestAuthorizationContext> anonymousOrValidToken() {
+        return (authentication, context) -> new AuthorizationDecision(
+                JwtAuthenticationFilter.bearerToken(context.getRequest()) == null
+                        || authentication.get().getPrincipal() instanceof User);
     }
 
     @Bean
