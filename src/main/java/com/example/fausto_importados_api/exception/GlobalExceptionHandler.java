@@ -5,6 +5,7 @@ import com.example.fausto_importados_api.concurrency.DbErrors;
 import com.example.fausto_importados_api.concurrency.Versions;
 import com.example.fausto_importados_api.dto.validation.InvalidField;
 import com.example.fausto_importados_api.services.exception.BusinessException;
+import com.example.fausto_importados_api.services.exception.CampaignConflictException;
 import com.example.fausto_importados_api.services.exception.DuplicateProductException;
 import com.example.fausto_importados_api.services.exception.ResourceNotFoundException;
 import com.fasterxml.jackson.databind.JsonMappingException;
@@ -67,6 +68,13 @@ public class GlobalExceptionHandler {
         return fieldProblem(ex.status(), ex.code(), ex.getMessage(), ex.fields());
     }
 
+    @ExceptionHandler(CampaignConflictException.class)
+    public ResponseEntity<?> handleCampaignConflict(CampaignConflictException ex) {
+        Map<String, Object> body = new LinkedHashMap<>(body(ex.code(), ex.getMessage()));
+        body.put("conflictingCampaign", ex.conflicting());
+        return ResponseEntity.status(ex.status()).body(body);
+    }
+
     /** Corpo que não pôde ser lido: JSON quebrado, tipo errado ou valor fora de uma lista fechada. */
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<?> handleUnreadable(HttpMessageNotReadableException ex) {
@@ -97,8 +105,8 @@ public class GlobalExceptionHandler {
     public ResponseEntity<?> handleIntegrity(DataIntegrityViolationException ex) {
         String state = DbErrors.sqlState(ex).orElse("");
         log.warn("Escrita recusada pelo banco (SQLSTATE {}): {}", state, ex.getMostSpecificCause().getMessage());
-        // 23505 = valor único repetido; 23503 = referência inexistente ou em uso
-        return state.equals("23505") || state.equals("23503")
+        // 23505 = valor único repetido; 23503 = referência inexistente ou em uso; 23P01 = períodos sobrepostos
+        return state.equals("23505") || state.equals("23503") || state.equals("23P01")
                 ? problem(HttpStatus.CONFLICT, "conflict", "O registro conflita com um já existente.")
                 : problem(HttpStatus.BAD_REQUEST, "invalid_data", "Dados inválidos.");
     }
