@@ -37,13 +37,24 @@ public final class TestPostgres {
         container.start();
     }
 
+    /** Os dados de conexão só valem depois de {@link #startOrSkip}. */
+    public static String url() {
+        return EXTERNAL_URL != null ? EXTERNAL_URL : container.getJdbcUrl();
+    }
+
+    public static String username() {
+        return EXTERNAL_URL != null ? System.getProperty("test.postgres.user", "postgres") : container.getUsername();
+    }
+
+    public static String password() {
+        return EXTERNAL_URL != null ? System.getProperty("test.postgres.password", "") : container.getPassword();
+    }
+
     /** Chamar num {@code @DynamicPropertySource}. */
     public static void register(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", () -> EXTERNAL_URL != null ? EXTERNAL_URL : container.getJdbcUrl());
-        registry.add("spring.datasource.username", () -> EXTERNAL_URL != null
-                ? System.getProperty("test.postgres.user", "postgres") : container.getUsername());
-        registry.add("spring.datasource.password", () -> EXTERNAL_URL != null
-                ? System.getProperty("test.postgres.password", "") : container.getPassword());
+        registry.add("spring.datasource.url", TestPostgres::url);
+        registry.add("spring.datasource.username", TestPostgres::username);
+        registry.add("spring.datasource.password", TestPostgres::password);
         registry.add("spring.datasource.hikari.connection-init-sql", () -> "SET lock_timeout = '5s'");
         registry.add("spring.datasource.hikari.maximum-pool-size", () -> "20");
         registry.add("spring.flyway.enabled", () -> "true");
