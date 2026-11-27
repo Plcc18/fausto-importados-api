@@ -1,0 +1,142 @@
+package com.example.fausto_importados_api.concurrency;
+
+import com.example.fausto_importados_api.model.Campaign;
+import com.example.fausto_importados_api.model.enums.CampaignStatus;
+import com.example.fausto_importados_api.repository.CampaignRepository;
+import com.example.fausto_importados_api.support.CampaignFixtures;
+import com.fasterxml.jackson.databind.JsonNode;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/** As rotas de campanhas contra a API e o PostgreSQL de verdade. */
+class CampaignApiConcurrencyTest extends ConcurrencyTestSupport {
+
+    private static final String BASE = "/api/admin/campaigns";
+    private static final int THREADS = 6;
+
+    @Autowired CampaignRepository campaigns;
+
+    @BeforeEach
+    @AfterEach
+    void cleanUp() {
+        jdbc.update("delete from campaigns");
+    }
+
+    @Test
+    void onlyOneOfManySimultaneousEditsOfTheSameVersionWins() throws Exception {
+        Session admin = admin();
+        UUID id = save(CampaignStatus.DRAFT, 0, day(1), day(5));
+
+        List<Res> results;
+        try (AutoCloseable slow = slowDown("campaigns", "update", 0.2)) {
+            results = concurrently(THREADS, i -> () ->
+                    call("PUT", BASE + "/" + id, admin, Map.of("name", "Edição " + i, "version", 0)));
+        }
+
+        assertThat(countStatus(results, 200)).isEqualTo(1);
+        assertThat(results.stream().filter(r -> r.status() != 200))
+                .hasSize(THREADS - 1)
+                .allSatisfy(r -> {
+                    assertThat(r.status()).isEqualTo(409);
+                    assertThat(r.body().path("code").asText()).isEqualTo("version_conflict");
+                });
+        assertThat(campaigns.findById(id).orElseThrow().getVersion()).isEqualTo(1);
+    }
+
+    @Test
+    void simultaneousCreationsWithTheSameKeyCreateOnce() {
+        Session admin = admin();
+        String key = UUID.randomUUID().toString();
+
+        List<Res> results = concurrently(THREADS, i -> () ->
+                call("POST", BASE, admin, Map.of("name", "Natal"), Map.of("Idempotency-Key", key)));
+
+        assertThat(statuses(results)).containsOnly(201);
+        assertThat(results.stream().map(r -> r.body().path("id").asText()).distinct()).hasSize(1);
+        assertThat(campaigns.count()).isEqualTo(1);
+    }
+
+    @Test
+    void twoPublishedCampaignsCannotBeEditedIntoTheSamePeriod() throws Exception {
+        Session admin = admin();
+        UUID first = save(CampaignStatus.PUBLISHED, 5, day(1), day(5));
+        UUID second = save(CampaignStatus.PUBLISHED, 5, day(20), day(25));
+        List<UUID> ids = List.of(first, second);
+        List<Map<String, Object>> changes = new ArrayList<>();
+        for (UUID id : ids) {
+            Map<String, Object> change = document(admin, id);
+            change.put("startsAt", day(10).toString()); // as duas tentam ocupar o mesmo período
+            change.put("endsAt", day(15).toString());
+            changes.add(change);
+        }
+
+        List<Res> results;
+        try (AutoCloseable slow = slowDown("campaigns", "update", 0.2)) {
+            results = concurrently(2, i -> () -> call("PUT", BASE + "/" + ids.get(i), admin, changes.get(i)));
+        }
+
+        assertThat(statuses(results)).containsExactlyInAnyOrder(200, 409);
+        assertThat(results.stream().filter(r -> r.status() == 409))
+                .allSatisfy(r -> assertThat(r.body().path("code").asText()).isEqualTo("campaign_conflict"));
+    }
+
+    /** A ordenação, os filtros e a busca no PostgreSQL, que trata nulos e LIKE à sua maneira. */
+    @Test
+    void theListBehavesTheSameOnTheRealDatabase() {
+        Session admin = admin();
+        UUID older = save(CampaignStatus.PUBLISHED, 1, day(1), day(5));
+        UUID newer = save(CampaignStatus.PUBLISHED, 2, day(10), day(15));
+        UUID undated = save(CampaignStatus.DRAFT, 0, null, null);
+
+        Res all = call("GET", BASE, admin, null);
+        Res filtered = call("GET", BASE + "?status=PUBLISHED,DRAFT&phase=SCHEDULED&type=BLACK_FRIDAY&q=black"
+                + "&from=" + day(11) + "&to=" + day(30), admin, null);
+        Res wildcard = call("GET", BASE + "?q=%25", admin, null);
+
+        assertThat(ids(all)).containsExactly(undated.toString(), newer.toString(), older.toString());
+        assertThat(filtered.status()).isEqualTo(200);
+        assertThat(ids(filtered)).containsExactly(newer.toString());
+        assertThat(ids(wildcard)).isEmpty();
+    }
+
+    // ───────────────────────────── helpers ─────────────────────────────
+
+    private UUID save(CampaignStatus status, int priority, Instant start, Instant end) {
+        Campaign campaign = CampaignFixtures.complete();
+        campaign.setStatus(status);
+        campaign.setPriority(priority);
+        campaign.setStartsAt(start);
+        campaign.setEndsAt(end);
+        return campaigns.saveAndFlush(campaign).getId();
+    }
+
+    private Map<String, Object> document(Session admin, UUID id) {
+        JsonNode body = call("GET", BASE + "/" + id, admin, null).body();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> document = json.convertValue(body, LinkedHashMap.class);
+        return document;
+    }
+
+    private static List<String> ids(Res res) {
+        List<String> ids = new ArrayList<>();
+        res.body().path("content").forEach(item -> ids.add(item.path("id").asText()));
+        return ids;
+    }
+
+    /** Sempre no futuro: a API usa o relógio real. */
+    private static Instant day(int day) {
+        return Instant.now().truncatedTo(ChronoUnit.DAYS).plus(day, ChronoUnit.DAYS);
+    }
+}
