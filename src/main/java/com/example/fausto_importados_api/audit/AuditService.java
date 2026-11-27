@@ -20,6 +20,9 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,7 +35,8 @@ import java.util.regex.Pattern;
  *
  * <ul>
  *   <li><b>Nunca</b> grava credenciais: chaves de {@code details} que lembram senha, token, segredo, código ou
- *       hash são substituídas por {@code [redacted]}, e textos longos são cortados.</li>
+ *       hash são substituídas por {@code [redacted]}, e textos longos são cortados. Detalhes que ainda não caibam
+ *       perdem os maiores valores ({@code [omitted]}, com {@code truncated: true}), sempre como JSON válido.</li>
  *   <li>Cada registro é gravado numa transação própria: eventos de falha/negação persistem mesmo que a
  *       requisição termine em erro. Se a gravação falhar, o erro é logado e a operação segue — a
  *       auditoria nunca derruba o login nem o painel.</li>
@@ -47,7 +51,8 @@ public class AuditService {
     private static final Pattern SENSITIVE_KEY =
             Pattern.compile("(?i).*(password|passwd|token|secret|code|hash|authorization|cookie|challenge).*");
     private static final int MAX_VALUE_LENGTH = 500;
-    private static final int MAX_DETAILS_LENGTH = 4000;
+    private static final int MAX_DETAILS_LENGTH = 16_000;
+    private static final String OMITTED = "[omitted]";
     private static final int DENIED_PER_MINUTE = 10;
 
     private final AuditLogRepository repository;
@@ -158,11 +163,42 @@ public class AuditService {
             return null;
         }
         try {
-            String json = objectMapper.writeValueAsString(sanitize(details));
-            return json.length() <= MAX_DETAILS_LENGTH ? json : json.substring(0, MAX_DETAILS_LENGTH);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> clean = (Map<String, Object>) sanitize(details);
+            String json = objectMapper.writeValueAsString(clean);
+            return json.length() <= MAX_DETAILS_LENGTH ? json : shrink(clean);
         } catch (JsonProcessingException e) {
             return "{\"error\":\"details not serializable\"}";
         }
+    }
+
+    /**
+     * Um JSON cortado no meio não pode ser lido. Troca os maiores valores por um aviso até caber, olhando dentro de
+     * {@code changes} para perder o mínimo.
+     */
+    @SuppressWarnings("unchecked")
+    private String shrink(Map<String, Object> details) throws JsonProcessingException {
+        List<Map.Entry<String, Object>> values = new ArrayList<>();
+        details.entrySet().forEach(entry -> {
+            if (entry.getKey().equals("changes") && entry.getValue() instanceof Map<?, ?> changes) {
+                values.addAll(((Map<String, Object>) changes).entrySet());
+            } else {
+                values.add(entry);
+            }
+        });
+        Map<Map.Entry<String, Object>, Integer> sizes = new IdentityHashMap<>();
+        for (Map.Entry<String, Object> value : values) {
+            sizes.put(value, objectMapper.writeValueAsString(value.getValue()).length());
+        }
+        values.sort(Comparator.comparing(sizes::get, Comparator.reverseOrder()));
+
+        details.put("truncated", true);
+        String json = objectMapper.writeValueAsString(details);
+        for (int i = 0; i < values.size() && json.length() > MAX_DETAILS_LENGTH; i++) {
+            values.get(i).setValue(OMITTED);
+            json = objectMapper.writeValueAsString(details);
+        }
+        return json.length() <= MAX_DETAILS_LENGTH ? json : "{\"truncated\":true}";
     }
 
     /** Remove credenciais e corta valores longos. Público para teste. */

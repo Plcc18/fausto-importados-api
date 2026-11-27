@@ -68,13 +68,23 @@ public class CampaignController {
             @RequestParam(defaultValue = "20") int size
     ) {
         CampaignFilter filter = CampaignFilter.parse(status, phase, type, from, to, q);
-        return new PagedModel<>(campaigns.search(
-                filter, Math.max(page, 0), Math.min(Math.max(size, 1), MAX_PAGE_SIZE)));
+        return new PagedModel<>(campaigns.search(filter, Math.max(page, 0), pageSize(size)));
     }
 
     @GetMapping("/{id}")
     public CampaignDetail get(@PathVariable UUID id) {
         return campaigns.get(id);
+    }
+
+    /** O que foi feito com a campanha, no mesmo formato de {@code /api/admin/audit}. */
+    @GetMapping("/{id}/history")
+    public PagedModel<AuditController.Entry> history(
+            @PathVariable UUID id,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size
+    ) {
+        return new PagedModel<>(campaigns.history(id, Math.max(page, 0), pageSize(size))
+                .map(AuditController.Entry::from));
     }
 
     /** Como a loja exibiria esta campanha, em qualquer situação. */
@@ -171,6 +181,10 @@ public class CampaignController {
     public ResponseEntity<Void> delete(@PathVariable UUID id, @RequestParam(required = false) Long version) {
         campaigns.delete(id, version);
         return ResponseEntity.noContent().build();
+    }
+
+    private static int pageSize(int requested) {
+        return Math.min(Math.max(requested, 1), MAX_PAGE_SIZE);
     }
 
     private static Long version(VersionRequest body) {

@@ -21,6 +21,9 @@ public interface AuditLogRepository extends JpaRepository<AuditLog, UUID> {
 
     Page<AuditLog> findByActionAndEntityTypeOrderByOccurredAtDesc(String action, String entityType, Pageable pageable);
 
+    Page<AuditLog> findByEntityTypeAndEntityIdOrderByOccurredAtDesc(
+            String entityType, String entityId, Pageable pageable);
+
     @Modifying
     @Query("delete from AuditLog a where a.occurredAt < :before")
     int deleteOlderThan(@Param("before") Instant before);
