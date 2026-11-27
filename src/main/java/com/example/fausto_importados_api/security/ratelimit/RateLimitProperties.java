@@ -29,6 +29,8 @@ import java.util.stream.Stream;
  * @param publicWrite       escritas públicas sensíveis, por IP (criação de pedido, cadastro, recuperação de senha)
  * @param apiUser           API em geral, por usuário autenticado
  * @param apiAnon           API em geral, por IP, sem login
+ * @param publicRead        leitura pública servida da memória ({@code GET /api/campaigns/active}), por IP; contada em
+ *                          memória e fora das regras gerais
  * @param sensitivePaths    caminhos (além de POST /api/orders) que usam a regra {@code publicWrite}
  */
 @ConfigurationProperties(prefix = "security.rate-limit")
@@ -44,6 +46,7 @@ public record RateLimitProperties(
         @DefaultValue("3/1h") Rule publicWrite,
         @DefaultValue("100/1m") Rule apiUser,
         @DefaultValue("60/1m") Rule apiAnon,
+        @DefaultValue("120/1m") Rule publicRead,
         @DefaultValue({"/auth/register", "/auth/password/forgot", "/auth/password/reset"}) List<String> sensitivePaths
 ) {
 

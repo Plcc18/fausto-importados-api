@@ -47,6 +47,7 @@ security:
     public-write: 100000/1m
     api-user: 100000/1m
     api-anon: 100000/1m
+    public-read: 100000/1m
 
 # Cloudinary (dummy — nenhum teste faz upload real)
 cloudinary:

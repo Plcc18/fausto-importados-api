@@ -136,7 +136,8 @@ public class SecurityConfig {
         configuration.setAllowCredentials(true);
         // Sem isto o navegador esconde estes cabeçalhos do front (origem diferente da API)
         configuration.setExposedHeaders(List.of(
-                "Retry-After", "RateLimit-Limit", "RateLimit-Remaining", "RateLimit-Reset", "Idempotent-Replayed"));
+                "Retry-After", "RateLimit-Limit", "RateLimit-Remaining", "RateLimit-Reset", "Idempotent-Replayed",
+                "Date")); // a loja acerta o relógio por ela (ver PublicCampaignController)
         allowedOrigins.all().forEach(configuration::addAllowedOrigin);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);

@@ -135,6 +135,7 @@ tempo; uma janela inteira sem uso o enche de novo. A checagem e o gasto da ficha
 | `RATE_LIMIT_PUBLIC_WRITE` | `3/1h` | IP, em `POST /api/orders` e nos caminhos de `security.rate-limit.sensitive-paths` (cadastro e recuperação de senha, quando existirem) |
 | `RATE_LIMIT_API_USER` | `100/1m` | usuário logado (independe do IP) |
 | `RATE_LIMIT_API_ANON` | `60/1m` | IP, sem login |
+| `RATE_LIMIT_PUBLIC_READ` | `120/1m` | IP, só em `GET /api/campaigns/active`. Contado **em memória** (cada instância conta sozinha) e fora das duas regras acima: a rota vem do cache e não consulta o banco |
 
 Formato `máximo/janela` (`5/15m`, `100/1m`, `3/1h`). `RATE_LIMIT_ENABLED=false` desliga tudo. Além disto, o bloqueio
 progressivo do login (`LoginThrottle`, dobra até 30 min e libera sozinho) continua valendo por conta e por IP.

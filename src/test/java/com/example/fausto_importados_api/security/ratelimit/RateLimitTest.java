@@ -38,6 +38,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
         "spring.datasource.url=jdbc:h2:mem:ratelimit;DB_CLOSE_DELAY=-1",
         "security.rate-limit.trusted-proxy-hops=1",
         "security.rate-limit.api-anon=6/1m",
+        "security.rate-limit.public-read=3/1m",
         "security.rate-limit.api-user=5/1m",
         "security.rate-limit.login-ip=4/15m",
         "security.rate-limit.login-email=5/15m",
@@ -156,6 +157,43 @@ class RateLimitTest {
         assertThat(me(otherToken, ipA).getStatus()).isEqualTo(200);
         // e o IP de quem esgotou segue livre para quem não está logado
         assertThat(anon(ipA).getStatus()).isNotEqualTo(429);
+    }
+
+    // ───────────────────── campanha da loja ─────────────────────
+
+    @Test
+    void theStoreCampaign_hasItsOwnLimitPerIp() throws Exception {
+        String ip = freshIp();
+
+        for (int i = 1; i <= 3; i++) {
+            MockHttpServletResponse ok = campaign(ip);
+            assertThat(ok.getStatus()).as("requisição %d", i).isEqualTo(200);
+            assertThat(ok.getHeader("RateLimit-Limit")).isEqualTo("3");
+        }
+        MockHttpServletResponse limited = campaign(ip);
+
+        assertThat(limited.getStatus()).isEqualTo(429);
+        assertThat(limited.getHeader("Retry-After")).isNotBlank();
+        assertThat(campaign(freshIp()).getStatus()).isEqualTo(200);
+    }
+
+    @Test
+    void theStoreCampaign_andTheCatalog_doNotSpendEachOthersQuota() throws Exception {
+        String visitor = freshIp();
+        for (int i = 0; i < 3; i++) {
+            campaign(visitor);
+        }
+        assertThat(campaign(visitor).getStatus()).isEqualTo(429);
+        for (int i = 1; i <= 6; i++) { // a cota geral continua inteira
+            assertThat(anon(visitor).getStatus()).as("catálogo %d", i).isNotEqualTo(429);
+        }
+        assertThat(anon(visitor).getStatus()).isEqualTo(429);
+
+        String other = freshIp();
+        for (int i = 0; i < 7; i++) {
+            anon(other);
+        }
+        assertThat(campaign(other).getStatus()).isEqualTo(200);
     }
 
     // ───────────────────── X-Forwarded-For forjado não burla ─────────────────────
@@ -313,6 +351,10 @@ class RateLimitTest {
 
     private MockHttpServletResponse anon(String ip) throws Exception {
         return mvc.perform(get("/api/product").header("X-Forwarded-For", ip)).andReturn().getResponse();
+    }
+
+    private MockHttpServletResponse campaign(String ip) throws Exception {
+        return mvc.perform(get("/api/campaigns/active").header("X-Forwarded-For", ip)).andReturn().getResponse();
     }
 
     private MockHttpServletResponse anonAdmin(String ip) throws Exception {

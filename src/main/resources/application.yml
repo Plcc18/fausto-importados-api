@@ -74,6 +74,7 @@ security:
     public-write: "${RATE_LIMIT_PUBLIC_WRITE:3/1h}"
     api-user: "${RATE_LIMIT_API_USER:100/1m}"
     api-anon: "${RATE_LIMIT_API_ANON:60/1m}"
+    public-read: "${RATE_LIMIT_PUBLIC_READ:120/1m}"
 
 # Concorrência. Ligue os dois "require" só depois que o front enviar o cabeçalho Idempotency-Key e o campo version.
 app:
