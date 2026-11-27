@@ -9,6 +9,7 @@ import com.example.fausto_importados_api.repository.AuditLogRepository;
 import com.example.fausto_importados_api.repository.CampaignRepository;
 import com.example.fausto_importados_api.repository.UserRepository;
 import com.example.fausto_importados_api.security.jwt.JwtService;
+import com.example.fausto_importados_api.services.ActiveCampaignCache;
 import com.example.fausto_importados_api.support.CampaignFixtures;
 import com.example.fausto_importados_api.support.MutableClock;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -76,6 +77,8 @@ abstract class CampaignApiTestSupport {
     @Autowired AuditLogRepository auditLog;
     @Autowired PasswordEncoder passwordEncoder;
     @Autowired JwtService jwtService;
+    @Autowired ActiveCampaignCache storeCache;
+    @Autowired MutableClock clock;
 
     record Admin(User user, String token) {
     }
@@ -96,7 +99,9 @@ abstract class CampaignApiTestSupport {
 
     @BeforeEach
     void signInAnAdmin() throws Exception {
+        clock.set(NOW);
         campaigns.deleteAll();
+        storeCache.invalidate(); // a exclusão direta no banco não passa pelos serviços
         admin = signIn(Role.ADMIN);
     }
 

@@ -48,6 +48,7 @@ public class CampaignService {
     private final Transactions transactions;
     private final Versions versions;
     private final AuditService audit;
+    private final ActiveCampaignCache storeCache;
     private final Clock clock;
 
     public CampaignService(
@@ -58,6 +59,7 @@ public class CampaignService {
             Transactions transactions,
             Versions versions,
             AuditService audit,
+            ActiveCampaignCache storeCache,
             Clock clock
     ) {
         this.campaigns = campaigns;
@@ -67,6 +69,7 @@ public class CampaignService {
         this.transactions = transactions;
         this.versions = versions;
         this.audit = audit;
+        this.storeCache = storeCache;
         this.clock = clock;
     }
 
@@ -258,6 +261,8 @@ public class CampaignService {
         details.put("version", campaign.getVersion());
         details.putAll(extra);
         UUID id = campaign.getId();
+        // toda escrita passa por aqui: depois do commit, a loja volta a ler o banco
+        transactions.afterCommit(storeCache::invalidate);
         transactions.afterCommit(() -> audit.recordSuccess(action, "CAMPAIGN", id, details));
     }
 

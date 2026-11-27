@@ -29,11 +29,13 @@ class CampaignApiConcurrencyTest extends ConcurrencyTestSupport {
     private static final int THREADS = 6;
 
     @Autowired CampaignRepository campaigns;
+    @Autowired com.example.fausto_importados_api.services.ActiveCampaignCache storeCache;
 
     @BeforeEach
     @AfterEach
     void cleanUp() {
         jdbc.update("delete from campaigns");
+        storeCache.invalidate();
     }
 
     @Test

@@ -28,6 +28,8 @@ public class RateLimiter {
     private static final int MAX_KEY = 120;
 
     private final RateLimitStore store;
+    /** Para as rotas servidas da memória: contar o limite não pode custar uma ida ao banco. */
+    private final RateLimitStore local = new MemoryRateLimitStore();
     private final Clock clock;
     private final AuditService audit;
 
@@ -46,6 +48,15 @@ public class RateLimiter {
      * @param clientIp só para o log
      */
     public Decision check(String ruleName, Rule rule, String subject, String clientIp) {
+        return check(store, ruleName, rule, subject, clientIp);
+    }
+
+    /** Como {@link #check}, mas sempre em memória: cada instância conta sozinha. */
+    public Decision checkLocally(String ruleName, Rule rule, String subject, String clientIp) {
+        return check(local, ruleName, rule, subject, clientIp);
+    }
+
+    private Decision check(RateLimitStore store, String ruleName, Rule rule, String subject, String clientIp) {
         String key = key(ruleName, subject);
         long now = clock.millis();
         long windowMs = rule.window().toMillis();

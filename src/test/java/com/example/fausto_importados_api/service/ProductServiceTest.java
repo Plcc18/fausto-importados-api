@@ -51,7 +51,8 @@ class ProductServiceTest {
                 new ConcurrencyProperties(3, Duration.ofMillis(1), false, false, Duration.ofDays(1));
         // transação de mentira: o que interessa aqui são as regras do serviço
         productService = new ProductService(productRepository, null, new ProductMapper(),
-                new Transactions(mock(PlatformTransactionManager.class), properties), new Versions(properties));
+                new Transactions(mock(PlatformTransactionManager.class), properties), new Versions(properties),
+                mock(com.example.fausto_importados_api.services.ActiveCampaignCache.class));
 
         product = new Product();
         product.setName("Ceboliinha");

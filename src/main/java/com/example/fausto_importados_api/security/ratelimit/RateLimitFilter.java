@@ -54,7 +54,12 @@ public class RateLimitFilter extends OncePerRequestFilter {
         this.proxyGate = proxyGate;
     }
 
-    private record Check(String name, Rule rule, String subject) {
+    /** @param local contado em memória, sem ir ao armazenamento compartilhado */
+    private record Check(String name, Rule rule, String subject, boolean local) {
+
+        Check(String name, Rule rule, String subject) {
+            this(name, rule, subject, false);
+        }
     }
 
     @Override
@@ -92,7 +97,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
         Decision tightest = null;
         for (Check check : checks(request, path, user, RateLimitKeys.ip(ip))) {
-            Decision decision = limiter.check(check.name(), check.rule(), check.subject(), ip);
+            Decision decision = check.local()
+                    ? limiter.checkLocally(check.name(), check.rule(), check.subject(), ip)
+                    : limiter.check(check.name(), check.rule(), check.subject(), ip);
             if (!decision.allowed()) {
                 reject(response, decision);
                 return;
@@ -109,6 +116,13 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private List<Check> checks(HttpServletRequest request, String path, User user, String ipKey) {
         List<Check> checks = new ArrayList<>();
         boolean post = "POST".equals(request.getMethod());
+
+        // A campanha da loja vem da memória e é pedida a cada visita: tem limite próprio, também em memória, para não
+        // consultar o banco nem gastar a cota que o visitante usa no catálogo
+        if ("GET".equals(request.getMethod()) && path.equals("/api/campaigns/active")) {
+            checks.add(new Check("public-read", props.publicRead(), ipKey, true));
+            return checks;
+        }
 
         if (post && (path.equals("/auth/login") || path.equals("/auth/login/mfa"))) {
             checks.add(new Check("login-ip", props.loginIp(), ipKey));

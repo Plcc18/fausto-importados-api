@@ -44,19 +44,22 @@ public class ProductService {
     private final ProductMapper productMapper;
     private final Transactions transactions;
     private final Versions versions;
+    private final ActiveCampaignCache campaignCache;
 
     public ProductService(
             ProductRepository productRepository,
             Cloudinary cloudinary,
             ProductMapper productMapper,
             Transactions transactions,
-            Versions versions
+            Versions versions,
+            ActiveCampaignCache campaignCache
     ) {
         this.productRepository = productRepository;
         this.cloudinary = cloudinary;
         this.productMapper = productMapper;
         this.transactions = transactions;
         this.versions = versions;
+        this.campaignCache = campaignCache;
     }
 
     /** Chamada externa e lenta: nunca dentro de uma transação. */
@@ -146,7 +149,9 @@ public class ProductService {
 
             Map<String, Object> before = AuditDiff.product(product);
             productMapper.applyPatch(product, dto);
-            return new Change(before, validateAndPersist(product));
+            Product saved = validateAndPersist(product);
+            transactions.afterCommit(campaignCache::invalidate); // a loja não mostra produto desativado
+            return new Change(before, saved);
         });
     }
 
@@ -156,7 +161,9 @@ public class ProductService {
             Product product = lock(id);
             requireActive(product); // 404 se já estiver inativo
             product.setActive(false);
-            return productRepository.saveAndFlush(product);
+            Product saved = productRepository.saveAndFlush(product);
+            transactions.afterCommit(campaignCache::invalidate);
+            return saved;
         });
     }
 
