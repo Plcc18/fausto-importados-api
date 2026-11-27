@@ -52,7 +52,7 @@ Camadas em `com.example.fausto_importados_api`: `controller` → `services` → 
 ### Domínio
 - Produtos têm exclusão lógica (`active`); identidade única por nome, marca e tamanho entre os ativos. `stockQuantity` e `version` só são devolvidos a administradores.
 - Pedidos são criados sem login, com nomes, preços e total calculados no servidor. O estoque só baixa quando o admin conclui o pedido.
-- Upload (`/api/upload`) vai para o Cloudinary. Não há configuração de multipart no projeto, então vale o padrão do Spring (1 MB por arquivo).
+- Upload (`/api/upload`) vai para o Cloudinary, com limite de 5 MB por arquivo (`spring.servlet.multipart`, um só para tudo). Produtos usam o campo `image`; campanhas usam `?folder=campaigns` e o campo `file`, com o tipo conferido pelo conteúdo (JPEG, PNG ou WebP; SVG recusado).
 
 ## Documentação existente
 
