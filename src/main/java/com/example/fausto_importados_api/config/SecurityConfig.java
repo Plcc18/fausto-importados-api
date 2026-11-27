@@ -85,6 +85,8 @@ public class SecurityConfig {
                         // resposta sem estoque e não saberia que precisa renovar a sessão
                         .requestMatchers(HttpMethod.GET, "/api/product/**").access(anonymousOrValidToken())
                         .requestMatchers(HttpMethod.GET, "/api/image/**").permitAll()
+                        // Só esta rota: o resto de campanhas fica em /api/admin e exige ADMIN
+                        .requestMatchers(HttpMethod.GET, "/api/campaigns/active").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/user").hasRole("ADMIN")
                         .requestMatchers("/api/upload").hasRole("ADMIN")
                         // Criação de pedido é pública; gestão é ADMIN

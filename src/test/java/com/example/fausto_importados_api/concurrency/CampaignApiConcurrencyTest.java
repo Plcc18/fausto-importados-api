@@ -188,6 +188,30 @@ class CampaignApiConcurrencyTest extends ConcurrencyTestSupport {
         assertThat(productRows()).isEqualTo(before);
     }
 
+    /** A leitura pública usa uma transação REPEATABLE READ somente leitura: confere no banco de verdade. */
+    @Test
+    void theStoreReadsTheActiveCampaignFromTheRealDatabase() {
+        Product active = newProduct(1);
+        Product inactive = newProduct(1);
+        inactive.setActive(false);
+        products.save(inactive);
+        Campaign campaign = CampaignFixtures.complete();
+        campaign.setStatus(CampaignStatus.PUBLISHED);
+        campaign.setStartsAt(day(-1));
+        campaign.setEndsAt(day(5));
+        campaign.addCollection(CampaignFixtures.collection("ofertas", 0, inactive.getId(), active.getId()));
+        UUID id = campaigns.saveAndFlush(campaign).getId();
+
+        Res res = call("GET", "/api/campaigns/active", null, null, Map.of("X-Forwarded-For", freshIp()));
+
+        assertThat(res.status()).isEqualTo(200);
+        assertThat(res.body().path("campaign").path("id").asText()).isEqualTo(id.toString());
+        assertThat(res.body().path("campaign").path("collections").path(0).path("productIds"))
+                .singleElement()
+                .satisfies(productId -> assertThat(productId.asText()).isEqualTo(active.getId().toString()));
+        assertThat(res.body().path("nextChangeAt").asText()).isEqualTo(campaign.getEndsAt().toString());
+    }
+
     @Test
     void duplicatingAndDeletingWorkWithCollectionsOnTheRealDatabase() {
         Session admin = admin();
