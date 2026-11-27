@@ -7,6 +7,12 @@ spring:
   config:
     import: "optional:file:.env[.properties]"
 
+  # Upload de imagens. Vale para produtos e campanhas (o limite do Spring é um só). Sem isto o padrão seria 1 MB
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB # o arquivo mais os outros campos do formulário
+
   # PostgreSQL
   datasource:
     url: "${DB_URL}"
@@ -33,6 +39,9 @@ spring:
 
 server:
   port: "${PORT:8080}"
+  tomcat:
+    # Até aqui o Tomcat lê o que sobrou de um envio recusado, para o 413 chegar ao navegador em vez de a conexão cair
+    max-swallow-size: 20MB
 
 # Logs: DEBUG do Spring Security só no profile dev (application-dev.yml)
 logging:

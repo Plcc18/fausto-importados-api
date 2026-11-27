@@ -20,6 +20,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import java.time.Instant;
 import java.util.Arrays;
@@ -66,6 +67,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(FieldValidationException.class)
     public ResponseEntity<?> handleFields(FieldValidationException ex) {
         return fieldProblem(ex.status(), ex.code(), ex.getMessage(), ex.fields());
+    }
+
+    /** Arquivo ou requisição acima do limite de multipart (application.yml). */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<?> handleTooLarge(MaxUploadSizeExceededException ex) {
+        return problem(HttpStatus.PAYLOAD_TOO_LARGE, "file_too_large", "O arquivo passa do limite de 5 MB.");
     }
 
     @ExceptionHandler(CampaignConflictException.class)

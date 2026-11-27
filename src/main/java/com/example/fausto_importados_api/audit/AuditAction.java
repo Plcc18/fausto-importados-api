@@ -43,6 +43,7 @@ public enum AuditAction {
     CAMPAIGN_DUPLICATED,
     CAMPAIGN_ARCHIVED,
     CAMPAIGN_DELETED,
+    CAMPAIGN_IMAGE_UPLOADED,
 
     // ── pedidos ──
     ORDER_COMPLETED,
