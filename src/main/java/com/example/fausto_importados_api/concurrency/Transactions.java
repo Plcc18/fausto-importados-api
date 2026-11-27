@@ -26,7 +26,8 @@ import java.util.function.Supplier;
  * <ol>
  *   <li>chave de idempotência;</li>
  *   <li>pedido, depois produtos em ordem de id;</li>
- *   <li>administradores ativos em ordem de id, depois o usuário alvo, depois os tokens e códigos dele.</li>
+ *   <li>administradores ativos em ordem de id, depois o usuário alvo, depois os tokens e códigos dele;</li>
+ *   <li>campanha, depois o lock de publicação ({@code CampaignConflictGuard}).</li>
  * </ol>
  *
  * <p>Regras para o código passado a {@link #run}: pode ser executado mais de uma vez; não faz chamada externa lenta
