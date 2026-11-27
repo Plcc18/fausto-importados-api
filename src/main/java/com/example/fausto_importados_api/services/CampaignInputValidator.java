@@ -2,13 +2,18 @@ package com.example.fausto_importados_api.services;
 
 import com.example.fausto_importados_api.dto.campaign.CampaignDates;
 import com.example.fausto_importados_api.dto.campaign.CampaignInput;
+import com.example.fausto_importados_api.dto.campaign.CollectionInput;
 import com.example.fausto_importados_api.dto.validation.FieldChecks;
+import com.example.fausto_importados_api.model.campaign.CampaignContent;
+import com.example.fausto_importados_api.model.campaign.CampaignTheme;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 
 /**
  * Confere tudo o que vem ao criar ou editar uma campanha (contrato da API, §4). Vale também para rascunho: nada é
@@ -27,15 +32,22 @@ public class CampaignInputValidator {
 
     private final CampaignContentValidator contentValidator;
 
-    public CampaignInputValidator(CampaignContentValidator contentValidator) {
+    private final CampaignCollectionValidator collectionValidator;
+
+    public CampaignInputValidator(
+            CampaignContentValidator contentValidator, CampaignCollectionValidator collectionValidator
+    ) {
         this.contentValidator = contentValidator;
+        this.collectionValidator = collectionValidator;
     }
 
     /**
+     * @param ownCollections ids das coleções que a campanha já tem (vazio na criação)
      * @return a cópia normalizada, que é a que deve ser gravada
      * @throws com.example.fausto_importados_api.exception.FieldValidationException com todos os campos recusados
      */
-    public CampaignInput validate(CampaignInput input) {
+    public CampaignInput validate(CampaignInput input, Set<UUID> ownCollections) {
+        collectionValidator.rejectDiscounts(input.collections());
         FieldChecks checks = new FieldChecks();
 
         String name = checks.optionalText("name", input.name(), MAX_NAME);
@@ -59,14 +71,13 @@ public class CampaignInputValidator {
             }
         }
 
-        // recusar em vez de ignorar: o admin não pode achar que as coleções foram salvas
-        if (input.collections() != null && !input.collections().isEmpty()) {
-            checks.reject("collections", "As coleções ainda não podem ser salvas.");
-        }
+        CampaignTheme theme = contentValidator.theme(input.theme(), checks);
+        CampaignContent content = contentValidator.content(input.content(), checks);
+        List<CollectionInput> collections =
+                collectionValidator.collections(input.collections(), ownCollections, checks);
 
         CampaignInput clean = new CampaignInput(name, description, input.type(), priority, startsAt, endsAt,
-                contentValidator.theme(input.theme(), checks), contentValidator.content(input.content(), checks),
-                List.of(), input.version());
+                theme, content, collections, input.version());
         checks.throwIfInvalid();
         return clean;
     }

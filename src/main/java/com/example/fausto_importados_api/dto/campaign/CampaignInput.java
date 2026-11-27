@@ -11,7 +11,7 @@ import java.util.List;
  * Corpo de criar e editar. A edição substitui o documento inteiro: o que não vier fica vazio.
  *
  * @param priority    ausente = 0
- * @param collections ainda não são gravadas: só uma lista vazia ou ausente é aceita
+ * @param collections ausente = nenhuma
  * @param version     versão lida antes de editar (ignorada na criação)
  */
 public record CampaignInput(
@@ -23,7 +23,7 @@ public record CampaignInput(
         Instant endsAt,
         CampaignTheme theme,
         CampaignContent content,
-        List<Object> collections,
+        List<CollectionInput> collections,
         Long version
 ) {
 }

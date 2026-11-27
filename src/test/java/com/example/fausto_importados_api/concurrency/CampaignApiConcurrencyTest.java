@@ -14,6 +14,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -160,6 +161,34 @@ class CampaignApiConcurrencyTest extends ConcurrencyTestSupport {
     }
 
     @Test
+    void oneEditCanSwapAndReuseSlugsWithoutTouchingTheProducts() {
+        Session admin = admin();
+        Product a = newProduct(1);
+        Product b = newProduct(1);
+        List<Map<String, Object>> before = productRows();
+        Campaign campaign = CampaignFixtures.complete();
+        campaign.addCollection(CampaignFixtures.collection("ofertas", 0, a.getId(), b.getId()));
+        campaign.addCollection(CampaignFixtures.collection("presentes", 1, a.getId()));
+        campaign.addCollection(CampaignFixtures.collection("sobra", 2));
+        UUID id = campaigns.saveAndFlush(campaign).getId();
+        Map<String, Object> document = document(admin, id);
+        JsonNode current = json.valueToTree(document.get("collections"));
+
+        document.put("collections", List.of(
+                collection(current.path(1).path("id").asText(), "ofertas", a.getId()),
+                collection(null, "sobra", b.getId()),
+                collection(current.path(0).path("id").asText(), "presentes", b.getId(), a.getId())));
+        Res res = call("PUT", BASE + "/" + id, admin, document);
+
+        assertThat(res.status()).isEqualTo(200);
+        assertThat(res.body().path("collections").findValuesAsText("slug"))
+                .containsExactly("ofertas", "sobra", "presentes");
+        assertThat(count("campaign_collections")).isEqualTo(3);
+        assertThat(count("campaign_collection_products")).isEqualTo(4);
+        assertThat(productRows()).isEqualTo(before);
+    }
+
+    @Test
     void duplicatingAndDeletingWorkWithCollectionsOnTheRealDatabase() {
         Session admin = admin();
         Product a = newProduct(1);
@@ -199,6 +228,19 @@ class CampaignApiConcurrencyTest extends ConcurrencyTestSupport {
         @SuppressWarnings("unchecked")
         Map<String, Object> document = json.convertValue(body, LinkedHashMap.class);
         return document;
+    }
+
+    private static Map<String, Object> collection(String id, String slug, UUID... products) {
+        Map<String, Object> collection = new LinkedHashMap<>();
+        collection.put("id", id);
+        collection.put("title", "Coleção");
+        collection.put("slug", slug);
+        collection.put("products", Arrays.stream(products).map(p -> Map.of("productId", p)).toList());
+        return collection;
+    }
+
+    private List<Map<String, Object>> productRows() {
+        return jdbc.queryForList("select * from products order by id");
     }
 
     private int count(String table) {
