@@ -1,6 +1,7 @@
 package com.example.fausto_importados_api.controller;
 
 import com.example.fausto_importados_api.concurrency.IdempotencyService;
+import com.example.fausto_importados_api.dto.campaign.ActiveCampaignResponse;
 import com.example.fausto_importados_api.dto.campaign.CampaignDetail;
 import com.example.fausto_importados_api.dto.campaign.CampaignFilter;
 import com.example.fausto_importados_api.dto.campaign.CampaignInput;
@@ -10,6 +11,7 @@ import com.example.fausto_importados_api.model.User;
 import com.example.fausto_importados_api.security.reauth.ReauthInterceptor;
 import com.example.fausto_importados_api.security.reauth.RequiresReauth;
 import com.example.fausto_importados_api.services.CampaignService;
+import com.example.fausto_importados_api.services.PublicCampaignService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.data.web.PagedModel;
 import org.springframework.http.HttpStatus;
@@ -40,11 +42,18 @@ public class CampaignController {
     private final CampaignService campaigns;
     private final IdempotencyService idempotency;
     private final ReauthInterceptor reauth;
+    private final PublicCampaignService storefront;
 
-    public CampaignController(CampaignService campaigns, IdempotencyService idempotency, ReauthInterceptor reauth) {
+    public CampaignController(
+            CampaignService campaigns,
+            IdempotencyService idempotency,
+            ReauthInterceptor reauth,
+            PublicCampaignService storefront
+    ) {
         this.campaigns = campaigns;
         this.idempotency = idempotency;
         this.reauth = reauth;
+        this.storefront = storefront;
     }
 
     @GetMapping
@@ -66,6 +75,12 @@ public class CampaignController {
     @GetMapping("/{id}")
     public CampaignDetail get(@PathVariable UUID id) {
         return campaigns.get(id);
+    }
+
+    /** Como a loja exibiria esta campanha, em qualquer situação. */
+    @GetMapping("/{id}/preview")
+    public ActiveCampaignResponse preview(@PathVariable UUID id) {
+        return storefront.preview(id);
     }
 
     @PostMapping
