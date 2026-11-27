@@ -159,7 +159,6 @@ abstract class CampaignApiTestSupport {
         @SuppressWarnings("unchecked")
         Map<String, Object> body = json.convertValue(detail(id), LinkedHashMap.class);
         body.put("name", name);
-        body.put("collections", List.of());
         return body;
     }
 

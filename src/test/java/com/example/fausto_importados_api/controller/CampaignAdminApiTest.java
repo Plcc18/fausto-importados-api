@@ -100,14 +100,14 @@ class CampaignAdminApiTest extends CampaignApiTestSupport {
         body.put("priority", 101);
         body.put("endsAt", body.get("startsAt"));
         body.put("theme", Map.of("dark", Map.of("primary", "azul")));
-        body.put("collections", List.of(Map.of("title", "Ofertas", "slug", "ofertas")));
+        body.put("collections", List.of(Map.of("title", "Ofertas", "slug", "Com Espaço")));
 
         Res res = create(body);
 
         assertThat(res.status()).isEqualTo(400);
         assertThat(res.code()).isEqualTo("validation_failed");
         assertThat(res.fields()).containsExactly(
-                "name", "description", "priority", "endsAt", "collections", "theme.dark.primary");
+                "name", "description", "priority", "endsAt", "theme.dark.primary", "collections[0].slug");
         assertThat(campaigns.count()).isZero();
     }
 
@@ -238,17 +238,6 @@ class CampaignAdminApiTest extends CampaignApiTestSupport {
     @Test
     void editingAnUnknownCampaignAnswersNotFound() throws Exception {
         assertThat(put(UUID.randomUUID().toString(), Map.of("version", 0)).code()).isEqualTo("not_found");
-    }
-
-    @Test
-    void editingKeepsTheExistingCollections() throws Exception {
-        Campaign campaign = CampaignFixtures.complete();
-        campaign.addCollection(collection("ofertas", 0, UUID.randomUUID()));
-        String id = campaigns.save(campaign).getId().toString();
-
-        Res res = put(id, Map.of("name", "Nova", "version", 0));
-
-        assertThat(res.body().path("collections")).hasSize(1);
     }
 
     @Test

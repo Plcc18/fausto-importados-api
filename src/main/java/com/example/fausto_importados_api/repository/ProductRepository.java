@@ -19,6 +19,7 @@ import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 public interface ProductRepository extends JpaRepository<Product, UUID> {
@@ -28,6 +29,14 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
 
     // Buscar vários produtos ativos de uma vez (evita N+1 ao validar itens de um pedido)
     List<Product> findAllByIdInAndActiveTrue(Collection<UUID> ids);
+
+    /** Quais desses ids existem, ativos ou não. Só os ids: nenhum produto é carregado. */
+    @Query("select p.id from Product p where p.id in :ids")
+    Set<UUID> findExistingIds(@Param("ids") Collection<UUID> ids);
+
+    /** Quais desses ids são de produtos ativos. */
+    @Query("select p.id from Product p where p.id in :ids and p.active = true")
+    Set<UUID> findActiveIds(@Param("ids") Collection<UUID> ids);
 
     // Listar produtos ativos
     Page<Product> findAllByActiveTrue(Pageable pageable);

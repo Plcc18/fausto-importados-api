@@ -15,6 +15,7 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.Set;
@@ -143,6 +144,9 @@ public class Campaign {
     /**
      * Registra quem alterou e quando (e, na primeira vez, quem criou).
      *
+     * <p>{@code updatedAt} sempre avança, nem que seja um microssegundo: uma alteração só nas coleções não muda mais
+     * nada na campanha, e é essa mudança que faz a {@code version} subir, mesmo com o relógio parado ou atrasado.
+     *
      * @param now    hora do {@code Clock} injetado
      * @param author e-mail do admin
      */
@@ -151,7 +155,7 @@ public class Campaign {
             createdAt = now;
             createdBy = author;
         }
-        updatedAt = now;
+        updatedAt = updatedAt == null || now.isAfter(updatedAt) ? now : updatedAt.plus(1, ChronoUnit.MICROS);
         updatedBy = author;
     }
 

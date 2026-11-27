@@ -13,6 +13,8 @@ import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.test.context.ActiveProfiles;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 
@@ -166,6 +168,26 @@ class CampaignRepositoryTest {
         assertThat(read.getCreatedBy()).isEqualTo(AUTHOR);
         assertThat(read.getUpdatedBy()).isEqualTo("outra@test.com");
         assertThat(productIds(read, "ofertas")).containsExactly(A, B);
+    }
+
+    @Test
+    void aRegisteredChangeRaisesTheVersionEvenIfTheClockHasNotMoved() {
+        Campaign campaign = complete();
+        campaign.addCollection(collection("ofertas", 0, A));
+        UUID id = save(campaign);
+
+        for (Instant sameOrEarlier : List.of(NOW, NOW.minusSeconds(60))) {
+            Campaign editing = campaigns.findDetailById(id).orElseThrow();
+            bySlug(editing, "ofertas").replaceProducts(List.of(B));
+            editing.registerChange(sameOrEarlier, AUTHOR);
+            em.flush();
+            em.clear();
+        }
+
+        Campaign read = campaigns.findDetailById(id).orElseThrow();
+        assertThat(read.getVersion()).isEqualTo(2);
+        assertThat(read.getUpdatedAt()).isEqualTo(NOW.plus(2, ChronoUnit.MICROS));
+        assertThat(read.getCreatedAt()).isEqualTo(NOW);
     }
 
     @Test

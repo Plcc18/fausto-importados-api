@@ -9,8 +9,10 @@ import com.example.fausto_importados_api.dto.campaign.CampaignDetail;
 import com.example.fausto_importados_api.dto.campaign.CampaignFilter;
 import com.example.fausto_importados_api.dto.campaign.CampaignInput;
 import com.example.fausto_importados_api.dto.campaign.CampaignSummary;
+import com.example.fausto_importados_api.dto.campaign.CollectionInput;
 import com.example.fausto_importados_api.mapper.CampaignMapper;
 import com.example.fausto_importados_api.model.Campaign;
+import com.example.fausto_importados_api.model.CampaignCollection;
 import com.example.fausto_importados_api.model.enums.CampaignStatus;
 import com.example.fausto_importados_api.repository.CampaignRepository;
 import com.example.fausto_importados_api.repository.CampaignSpecifications;
@@ -24,9 +26,13 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.BiConsumer;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * Campanhas no painel. Toda escrita sobre uma campanha existente trava a linha, confere a {@code version} e a tabela
@@ -79,7 +85,7 @@ public class CampaignService {
 
     /** Sempre como rascunho. */
     public CampaignDetail create(CampaignInput input, String author) {
-        CampaignInput clean = validator.validate(input);
+        CampaignInput clean = validator.validate(input, Set.of());
         return transactions.run(() -> {
             Instant now = now();
             Campaign campaign = new Campaign();
@@ -92,7 +98,7 @@ public class CampaignService {
     }
 
     /**
-     * Substitui o documento inteiro (as coleções ainda não são alteradas por aqui). O status não muda.
+     * Substitui o documento inteiro, inclusive as coleções. O status não muda.
      *
      * @param requireReauth chamado se a campanha estiver publicada; lança se falta a confirmação 2FA
      */
@@ -106,15 +112,18 @@ public class CampaignService {
                 requireReauth.run();
             }
 
-            apply(validator.validate(input), campaign);
+            Set<UUID> ownCollections = campaign.getCollections().stream()
+                    .map(CampaignCollection::getId)
+                    .collect(Collectors.toSet());
+            apply(validator.validate(input, ownCollections), campaign);
             campaign.registerChange(now, author); // sempre: é o que faz a version subir
             if (published) {
                 CampaignPublishRequirements.check(campaign, now);
             }
             conflicts.ensureNoConflict(campaign); // antes de gravar; ignora o que não está publicado
-            Campaign saved = campaigns.saveAndFlush(campaign);
-            record(AuditAction.CAMPAIGN_UPDATED, saved);
-            return mapper.detail(saved, now);
+            campaigns.flush(); // a campanha já está gerenciada: as coleções novas são inseridas aqui e ganham id
+            record(AuditAction.CAMPAIGN_UPDATED, campaign);
+            return mapper.detail(campaign, now);
         });
     }
 
@@ -215,6 +224,27 @@ public class CampaignService {
         campaign.setEndsAt(input.endsAt());
         campaign.setTheme(input.theme());
         campaign.setContent(input.content());
+        applyCollections(input.collections(), campaign);
+    }
+
+    /** Coleção com id é atualizada, sem id é criada e a que não veio é apagada. Os produtos não são tocados. */
+    private static void applyCollections(List<CollectionInput> collections, Campaign campaign) {
+        Map<UUID, CampaignCollection> current = campaign.getCollections().stream()
+                .filter(c -> c.getId() != null)
+                .collect(Collectors.toMap(CampaignCollection::getId, Function.identity()));
+        Set<UUID> kept = collections.stream().map(CollectionInput::id).collect(Collectors.toSet());
+        campaign.getCollections().removeIf(c -> !kept.contains(c.getId()));
+
+        for (CollectionInput input : collections) {
+            CampaignCollection collection = input.id() == null ? new CampaignCollection() : current.get(input.id());
+            collection.setTitle(input.title());
+            collection.setSlug(input.slug());
+            collection.setPosition(input.position());
+            collection.replaceProducts(input.products().stream().map(CollectionInput.Product::productId).toList());
+            if (input.id() == null) {
+                campaign.addCollection(collection);
+            }
+        }
     }
 
     private void record(AuditAction action, Campaign campaign) {
