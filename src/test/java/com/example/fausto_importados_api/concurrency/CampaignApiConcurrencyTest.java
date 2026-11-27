@@ -215,6 +215,28 @@ class CampaignApiConcurrencyTest extends ConcurrencyTestSupport {
     }
 
     @Test
+    void theHistoryIsRecordedAndReadOnTheRealDatabase() throws Exception {
+        Session admin = admin();
+        Product product = newProduct(1);
+        Campaign campaign = CampaignFixtures.complete();
+        campaign.setStartsAt(day(10));
+        campaign.setEndsAt(day(15));
+        campaign.addCollection(CampaignFixtures.collection("ofertas", 0, product.getId()));
+        UUID id = campaigns.saveAndFlush(campaign).getId();
+
+        assertThat(call("POST", BASE + "/" + id + "/publish", admin, Map.of("version", 0)).status()).isEqualTo(200);
+        assertThat(call("POST", BASE + "/" + id + "/disable", admin, Map.of("version", 1)).status()).isEqualTo(200);
+        Res history = call("GET", BASE + "/" + id + "/history", admin, null);
+
+        assertThat(history.status()).isEqualTo(200);
+        assertThat(history.body().path("content").findValuesAsText("action"))
+                .containsExactly("CAMPAIGN_DISABLED", "CAMPAIGN_PUBLISHED");
+        JsonNode details = json.readTree(history.body().path("content").path(1).path("details").asText());
+        assertThat(details.path("changes").path("status").path("to").asText()).isEqualTo("PUBLISHED");
+        assertThat(details.path("changes").has("collections")).isFalse(); // publicar não as altera
+    }
+
+    @Test
     void duplicatingAndDeletingWorkWithCollectionsOnTheRealDatabase() {
         Session admin = admin();
         Product a = newProduct(1);

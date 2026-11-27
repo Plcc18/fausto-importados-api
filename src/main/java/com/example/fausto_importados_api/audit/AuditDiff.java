@@ -3,8 +3,10 @@ package com.example.fausto_importados_api.audit;
 import com.example.fausto_importados_api.model.Product;
 
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /** Monta os "antes/depois" de produtos para a auditoria (só campos de negócio; nada sensível existe aqui). */
 public final class AuditDiff {
@@ -39,16 +41,19 @@ public final class AuditDiff {
         return summary;
     }
 
-    /** Só o que mudou: {campo: {from, to}}. */
+    /** Só o que mudou: {campo: {from, to}}. Um campo presente em um só dos lados vale nulo no outro. */
     public static Map<String, Object> diff(Map<String, Object> before, Map<String, Object> after) {
+        Set<String> fields = new LinkedHashSet<>(before.keySet());
+        fields.addAll(after.keySet());
         Map<String, Object> changes = new LinkedHashMap<>();
-        for (Map.Entry<String, Object> entry : after.entrySet()) {
-            Object previous = before.get(entry.getKey());
-            if (!Objects.equals(previous, entry.getValue())) {
+        for (String field : fields) {
+            Object previous = before.get(field);
+            Object current = after.get(field);
+            if (!Objects.equals(previous, current)) {
                 Map<String, Object> change = new LinkedHashMap<>();
                 change.put("from", previous);
-                change.put("to", entry.getValue());
-                changes.put(entry.getKey(), change);
+                change.put("to", current);
+                changes.put(field, change);
             }
         }
         return changes;

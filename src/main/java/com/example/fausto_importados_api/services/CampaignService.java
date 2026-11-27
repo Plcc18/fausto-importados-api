@@ -2,6 +2,8 @@ package com.example.fausto_importados_api.services;
 
 import com.example.fausto_importados_api.audit.AuditAction;
 import com.example.fausto_importados_api.audit.AuditService;
+import com.example.fausto_importados_api.audit.CampaignAuditDiff;
+import com.example.fausto_importados_api.audit.CampaignAuditDiff.Snapshot;
 import com.example.fausto_importados_api.concurrency.ApiProblemException;
 import com.example.fausto_importados_api.concurrency.Transactions;
 import com.example.fausto_importados_api.concurrency.Versions;
@@ -11,9 +13,11 @@ import com.example.fausto_importados_api.dto.campaign.CampaignInput;
 import com.example.fausto_importados_api.dto.campaign.CampaignSummary;
 import com.example.fausto_importados_api.dto.campaign.CollectionInput;
 import com.example.fausto_importados_api.mapper.CampaignMapper;
+import com.example.fausto_importados_api.model.AuditLog;
 import com.example.fausto_importados_api.model.Campaign;
 import com.example.fausto_importados_api.model.CampaignCollection;
 import com.example.fausto_importados_api.model.enums.CampaignStatus;
+import com.example.fausto_importados_api.repository.AuditLogRepository;
 import com.example.fausto_importados_api.repository.CampaignRepository;
 import com.example.fausto_importados_api.repository.CampaignSpecifications;
 import org.springframework.data.domain.Page;
@@ -41,6 +45,9 @@ import java.util.stream.Collectors;
 @Service
 public class CampaignService {
 
+    /** {@code entity_type} das campanhas na trilha de auditoria. */
+    private static final String AUDIT_ENTITY = "CAMPAIGN";
+
     private final CampaignRepository campaigns;
     private final CampaignInputValidator validator;
     private final CampaignConflictGuard conflicts;
@@ -48,6 +55,8 @@ public class CampaignService {
     private final Transactions transactions;
     private final Versions versions;
     private final AuditService audit;
+    private final AuditLogRepository auditLog;
+    private final CampaignAuditDiff auditDiff;
     private final ActiveCampaignCache storeCache;
     private final Clock clock;
 
@@ -59,6 +68,8 @@ public class CampaignService {
             Transactions transactions,
             Versions versions,
             AuditService audit,
+            AuditLogRepository auditLog,
+            CampaignAuditDiff auditDiff,
             ActiveCampaignCache storeCache,
             Clock clock
     ) {
@@ -69,6 +80,8 @@ public class CampaignService {
         this.transactions = transactions;
         this.versions = versions;
         this.audit = audit;
+        this.auditLog = auditLog;
+        this.auditDiff = auditDiff;
         this.storeCache = storeCache;
         this.clock = clock;
     }
@@ -86,6 +99,20 @@ public class CampaignService {
         return mapper.detail(campaigns.findDetailById(id).orElseThrow(CampaignService::notFound), now());
     }
 
+    /**
+     * O que foi feito com a campanha, do mais recente ao mais antigo. Continua disponível para um rascunho excluído,
+     * enquanto a retenção da auditoria guardar os registros.
+     */
+    @Transactional(readOnly = true)
+    public Page<AuditLog> history(UUID id, int page, int size) {
+        Page<AuditLog> entries = auditLog.findByEntityTypeAndEntityIdOrderByOccurredAtDesc(
+                AUDIT_ENTITY, id.toString(), PageRequest.of(page, size));
+        if (entries.getTotalElements() == 0 && !campaigns.existsById(id)) {
+            throw notFound();
+        }
+        return entries;
+    }
+
     /** Sempre como rascunho. */
     public CampaignDetail create(CampaignInput input, String author) {
         CampaignInput clean = validator.validate(input, Set.of());
@@ -95,7 +122,7 @@ public class CampaignService {
             apply(clean, campaign);
             campaign.registerChange(now, author);
             Campaign saved = campaigns.saveAndFlush(campaign);
-            record(AuditAction.CAMPAIGN_CREATED, saved);
+            record(AuditAction.CAMPAIGN_CREATED, saved, Snapshot.empty(), auditDiff.snapshot(saved));
             return mapper.detail(saved, now);
         });
     }
@@ -115,6 +142,7 @@ public class CampaignService {
                 requireReauth.run();
             }
 
+            Snapshot before = auditDiff.snapshot(campaign);
             Set<UUID> ownCollections = campaign.getCollections().stream()
                     .map(CampaignCollection::getId)
                     .collect(Collectors.toSet());
@@ -125,7 +153,7 @@ public class CampaignService {
             }
             conflicts.ensureNoConflict(campaign); // antes de gravar; ignora o que não está publicado
             campaigns.flush(); // a campanha já está gerenciada: as coleções novas são inseridas aqui e ganham id
-            record(AuditAction.CAMPAIGN_UPDATED, campaign);
+            record(AuditAction.CAMPAIGN_UPDATED, campaign, before, auditDiff.snapshot(campaign));
             return mapper.detail(campaign, now);
         });
     }
@@ -170,7 +198,7 @@ public class CampaignService {
         transactions.execute(() -> {
             Campaign campaign = lock(id, version);
             CampaignAction.DELETE.require(campaign, now());
-            record(AuditAction.CAMPAIGN_DELETED, campaign);
+            record(AuditAction.CAMPAIGN_DELETED, campaign, auditDiff.snapshot(campaign), Snapshot.empty());
             campaigns.delete(campaign);
             campaigns.flush();
         });
@@ -183,7 +211,8 @@ public class CampaignService {
             Campaign copy = campaigns.findDetailById(id).orElseThrow(CampaignService::notFound).copyAsDraft();
             copy.registerChange(now, author);
             Campaign saved = campaigns.saveAndFlush(copy);
-            record(AuditAction.CAMPAIGN_DUPLICATED, saved, Map.of("sourceId", id.toString()));
+            record(AuditAction.CAMPAIGN_DUPLICATED, saved, Snapshot.empty(), auditDiff.snapshot(saved),
+                    Map.of("sourceId", id.toString()));
             return mapper.detail(saved, now);
         });
     }
@@ -196,11 +225,12 @@ public class CampaignService {
             Campaign campaign = lock(id, version);
             Instant now = now();
             action.require(campaign, now);
+            Snapshot before = auditDiff.snapshot(campaign);
             change.accept(campaign, now);
             campaign.registerChange(now, author);
             conflicts.ensureNoConflict(campaign); // antes de gravar; ignora o que não fica publicado
             Campaign saved = campaigns.saveAndFlush(campaign);
-            record(event, saved);
+            record(event, saved, before, auditDiff.snapshot(saved));
             return mapper.detail(saved, now);
         });
     }
@@ -250,20 +280,23 @@ public class CampaignService {
         }
     }
 
-    private void record(AuditAction action, Campaign campaign) {
-        record(action, campaign, Map.of());
+    private void record(AuditAction action, Campaign campaign, Snapshot before, Snapshot after) {
+        record(action, campaign, before, after, Map.of());
     }
 
-    private void record(AuditAction action, Campaign campaign, Map<String, ?> extra) {
+    private void record(
+            AuditAction action, Campaign campaign, Snapshot before, Snapshot after, Map<String, ?> extra
+    ) {
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("name", campaign.getName()); // o registro de uma exclusão precisa dizer o que foi excluído
         details.put("status", campaign.getStatus().name());
         details.put("version", campaign.getVersion());
         details.putAll(extra);
+        details.put("changes", auditDiff.changes(before, after));
         UUID id = campaign.getId();
         // toda escrita passa por aqui: depois do commit, a loja volta a ler o banco
         transactions.afterCommit(storeCache::invalidate);
-        transactions.afterCommit(() -> audit.recordSuccess(action, "CAMPAIGN", id, details));
+        transactions.afterCommit(() -> audit.recordSuccess(action, AUDIT_ENTITY, id, details));
     }
 
     /** Na precisão do banco. */
