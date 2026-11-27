@@ -11,7 +11,6 @@ import com.example.fausto_importados_api.dto.campaign.CampaignInput;
 import com.example.fausto_importados_api.dto.campaign.CampaignSummary;
 import com.example.fausto_importados_api.mapper.CampaignMapper;
 import com.example.fausto_importados_api.model.Campaign;
-import com.example.fausto_importados_api.model.enums.CampaignPhase;
 import com.example.fausto_importados_api.model.enums.CampaignStatus;
 import com.example.fausto_importados_api.repository.CampaignRepository;
 import com.example.fausto_importados_api.repository.CampaignSpecifications;
@@ -24,10 +23,15 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.BiConsumer;
 
-/** Campanhas no painel: listar, detalhar, criar rascunho e editar. */
+/**
+ * Campanhas no painel. Toda escrita sobre uma campanha existente trava a linha, confere a {@code version} e a tabela
+ * de transições ({@link CampaignAction}).
+ */
 @Service
 public class CampaignService {
 
@@ -94,10 +98,9 @@ public class CampaignService {
      */
     public CampaignDetail update(UUID id, CampaignInput input, String author, Runnable requireReauth) {
         return transactions.run(() -> {
-            Campaign campaign = campaigns.findByIdForUpdate(id).orElseThrow(CampaignService::notFound);
-            versions.check(input.version(), campaign.getVersion());
+            Campaign campaign = lock(id, input.version());
             Instant now = now();
-            requireEditable(campaign, now);
+            CampaignAction.EDIT.require(campaign, now);
             boolean published = campaign.getStatus() == CampaignStatus.PUBLISHED;
             if (published) {
                 requireReauth.run();
@@ -115,6 +118,94 @@ public class CampaignService {
         });
     }
 
+    public CampaignDetail publish(UUID id, Long version, String author) {
+        return transition(id, version, author, CampaignAction.PUBLISH, AuditAction.CAMPAIGN_PUBLISHED,
+                CampaignService::goLive);
+    }
+
+    /** Publica (se rascunho) e antecipa o início para agora; um início que já passou é mantido. */
+    public CampaignDetail activateNow(UUID id, Long version, String author) {
+        return transition(id, version, author, CampaignAction.ACTIVATE_NOW, AuditAction.CAMPAIGN_ACTIVATED,
+                (campaign, now) -> {
+                    if (campaign.getStartsAt() == null || campaign.getStartsAt().isAfter(now)) {
+                        campaign.setStartsAt(now);
+                    }
+                    if (campaign.getStatus() == CampaignStatus.PUBLISHED) {
+                        CampaignPublishRequirements.check(campaign, now);
+                    } else {
+                        goLive(campaign, now);
+                    }
+                });
+    }
+
+    public CampaignDetail disable(UUID id, Long version, String author) {
+        return transition(id, version, author, CampaignAction.DISABLE, AuditAction.CAMPAIGN_DISABLED,
+                (campaign, now) -> campaign.setStatus(CampaignStatus.DISABLED));
+    }
+
+    public CampaignDetail reactivate(UUID id, Long version, String author) {
+        return transition(id, version, author, CampaignAction.REACTIVATE, AuditAction.CAMPAIGN_REACTIVATED,
+                CampaignService::goLive);
+    }
+
+    public CampaignDetail archive(UUID id, Long version, String author) {
+        return transition(id, version, author, CampaignAction.ARCHIVE, AuditAction.CAMPAIGN_ARCHIVED,
+                (campaign, now) -> campaign.setStatus(CampaignStatus.ARCHIVED));
+    }
+
+    /** Só rascunhos. Apaga as coleções junto; os produtos não são tocados. */
+    public void delete(UUID id, Long version) {
+        transactions.execute(() -> {
+            Campaign campaign = lock(id, version);
+            CampaignAction.DELETE.require(campaign, now());
+            record(AuditAction.CAMPAIGN_DELETED, campaign);
+            campaigns.delete(campaign);
+            campaigns.flush();
+        });
+    }
+
+    /** Cópia como rascunho, sem datas, de uma campanha em qualquer situação. A original não muda. */
+    public CampaignDetail duplicate(UUID id, String author) {
+        return transactions.run(() -> {
+            Instant now = now();
+            Campaign copy = campaigns.findDetailById(id).orElseThrow(CampaignService::notFound).copyAsDraft();
+            copy.registerChange(now, author);
+            Campaign saved = campaigns.saveAndFlush(copy);
+            record(AuditAction.CAMPAIGN_DUPLICATED, saved, Map.of("sourceId", id.toString()));
+            return mapper.detail(saved, now);
+        });
+    }
+
+    private CampaignDetail transition(
+            UUID id, Long version, String author, CampaignAction action, AuditAction event,
+            BiConsumer<Campaign, Instant> change
+    ) {
+        return transactions.run(() -> {
+            Campaign campaign = lock(id, version);
+            Instant now = now();
+            action.require(campaign, now);
+            change.accept(campaign, now);
+            campaign.registerChange(now, author);
+            conflicts.ensureNoConflict(campaign); // antes de gravar; ignora o que não fica publicado
+            Campaign saved = campaigns.saveAndFlush(campaign);
+            record(event, saved);
+            return mapper.detail(saved, now);
+        });
+    }
+
+    /** Passa a publicada, se tiver tudo o que isso exige. */
+    private static void goLive(Campaign campaign, Instant now) {
+        campaign.setStatus(CampaignStatus.PUBLISHED);
+        campaign.setPublishedAt(now);
+        CampaignPublishRequirements.check(campaign, now);
+    }
+
+    private Campaign lock(UUID id, Long expectedVersion) {
+        Campaign campaign = campaigns.findByIdForUpdate(id).orElseThrow(CampaignService::notFound);
+        versions.check(expectedVersion, campaign.getVersion());
+        return campaign;
+    }
+
     private static void apply(CampaignInput input, Campaign campaign) {
         campaign.setName(input.name());
         campaign.setDescription(input.description());
@@ -126,17 +217,16 @@ public class CampaignService {
         campaign.setContent(input.content());
     }
 
-    private static void requireEditable(Campaign campaign, Instant now) {
-        if (campaign.getStatus() == CampaignStatus.ARCHIVED) {
-            throw invalidTransition("Uma campanha arquivada não pode ser editada.");
-        }
-        if (campaign.phaseAt(now) == CampaignPhase.EXPIRED) {
-            throw invalidTransition("Uma campanha encerrada não pode ser editada.");
-        }
+    private void record(AuditAction action, Campaign campaign) {
+        record(action, campaign, Map.of());
     }
 
-    private void record(AuditAction action, Campaign campaign) {
-        Map<String, Object> details = Map.of("status", campaign.getStatus().name(), "version", campaign.getVersion());
+    private void record(AuditAction action, Campaign campaign, Map<String, ?> extra) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("name", campaign.getName()); // o registro de uma exclusão precisa dizer o que foi excluído
+        details.put("status", campaign.getStatus().name());
+        details.put("version", campaign.getVersion());
+        details.putAll(extra);
         UUID id = campaign.getId();
         transactions.afterCommit(() -> audit.recordSuccess(action, "CAMPAIGN", id, details));
     }
@@ -148,9 +238,5 @@ public class CampaignService {
 
     private static ApiProblemException notFound() {
         return new ApiProblemException(HttpStatus.NOT_FOUND, "not_found", "Campanha não encontrada.");
-    }
-
-    private static ApiProblemException invalidTransition(String message) {
-        return new ApiProblemException(HttpStatus.CONFLICT, "invalid_transition", message);
     }
 }

@@ -15,6 +15,7 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.UUID;
@@ -119,6 +120,24 @@ public class Campaign {
     public void addCollection(CampaignCollection collection) {
         collection.setCampaign(this);
         collections.add(collection);
+    }
+
+    /**
+     * Rascunho novo com o mesmo nome, descrição, tipo, prioridade, visual e coleções; sem datas. Falta registrar quem
+     * criou ({@link #registerChange}).
+     */
+    public Campaign copyAsDraft() {
+        Campaign copy = new Campaign();
+        copy.name = name;
+        copy.description = description;
+        copy.type = type;
+        copy.priority = priority;
+        copy.theme = theme; // registros que ninguém altera: podem ser compartilhados
+        copy.content = content;
+        collections.stream()
+                .sorted(Comparator.comparingInt(CampaignCollection::getPosition))
+                .forEach(collection -> copy.addCollection(collection.copy()));
+        return copy;
     }
 
     /**

@@ -7,6 +7,7 @@ import com.example.fausto_importados_api.model.campaign.CampaignContent;
 import com.example.fausto_importados_api.model.campaign.CampaignTheme;
 import org.springframework.http.HttpStatus;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -31,6 +32,9 @@ public final class CampaignPublishRequirements {
         require(missing, "endsAt", campaign.getEndsAt(), "Informe o fim.");
         if (campaign.getEndsAt() != null && !campaign.getEndsAt().isAfter(now)) {
             missing.add(new InvalidField("endsAt", "O fim precisa ser no futuro."));
+        } else if (isTooLong(campaign.getStartsAt(), campaign.getEndsAt())) {
+            // "ativar agora" antecipa o início e pode estourar o limite conferido ao salvar
+            missing.add(new InvalidField("endsAt", CampaignInputValidator.TOO_LONG));
         }
 
         CampaignTheme theme = campaign.getTheme();
@@ -54,6 +58,11 @@ public final class CampaignPublishRequirements {
             throw new FieldValidationException(HttpStatus.UNPROCESSABLE_ENTITY, CODE,
                     "Faltam campos obrigatórios para publicar.", missing);
         }
+    }
+
+    private static boolean isTooLong(Instant startsAt, Instant endsAt) {
+        return startsAt != null && endsAt != null
+                && Duration.between(startsAt, endsAt).compareTo(CampaignInputValidator.MAX_DURATION) > 0;
     }
 
     private static void require(List<InvalidField> missing, String field, Object value, String message) {

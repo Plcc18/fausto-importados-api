@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.hibernate.annotations.BatchSize;
 
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -57,6 +58,19 @@ public class CampaignCollection {
         for (int index = 0; index < productIds.size(); index++) {
             products.add(new CampaignProduct(productIds.get(index), index));
         }
+    }
+
+    /** Coleção nova, ainda sem campanha, com o mesmo conteúdo. */
+    CampaignCollection copy() {
+        CampaignCollection copy = new CampaignCollection();
+        copy.title = title;
+        copy.slug = slug;
+        copy.position = position;
+        copy.replaceProducts(products.stream()
+                .sorted(Comparator.comparingInt(CampaignProduct::position))
+                .map(CampaignProduct::productId)
+                .toList());
+        return copy;
     }
 
     @Override
