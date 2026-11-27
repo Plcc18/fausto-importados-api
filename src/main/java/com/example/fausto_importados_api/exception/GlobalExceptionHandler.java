@@ -3,9 +3,12 @@ package com.example.fausto_importados_api.exception;
 import com.example.fausto_importados_api.concurrency.ApiProblemException;
 import com.example.fausto_importados_api.concurrency.DbErrors;
 import com.example.fausto_importados_api.concurrency.Versions;
+import com.example.fausto_importados_api.dto.validation.InvalidField;
 import com.example.fausto_importados_api.services.exception.BusinessException;
 import com.example.fausto_importados_api.services.exception.DuplicateProductException;
 import com.example.fausto_importados_api.services.exception.ResourceNotFoundException;
+import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.exc.MismatchedInputException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.ConcurrencyFailureException;
@@ -14,10 +17,15 @@ import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -54,6 +62,21 @@ public class GlobalExceptionHandler {
         return problem(ex.status(), ex.code(), ex.getMessage());
     }
 
+    @ExceptionHandler(FieldValidationException.class)
+    public ResponseEntity<?> handleFields(FieldValidationException ex) {
+        return fieldProblem(ex.status(), ex.code(), ex.getMessage(), ex.fields());
+    }
+
+    /** Corpo que não pôde ser lido: JSON quebrado, tipo errado ou valor fora de uma lista fechada. */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<?> handleUnreadable(HttpMessageNotReadableException ex) {
+        if (ex.getCause() instanceof JsonMappingException cause && !cause.getPath().isEmpty()) {
+            return fieldProblem(HttpStatus.BAD_REQUEST, FieldValidationException.CODE, FieldValidationException.MESSAGE,
+                    List.of(new InvalidField(jsonPath(cause), unreadableReason(cause))));
+        }
+        return problem(HttpStatus.BAD_REQUEST, "invalid_data", "O corpo da requisição não é um JSON válido.");
+    }
+
     /** O registro mudou entre a leitura e a gravação (lock otimista). */
     @ExceptionHandler(OptimisticLockingFailureException.class)
     public ResponseEntity<?> handleStale(OptimisticLockingFailureException ex) {
@@ -82,6 +105,36 @@ public class GlobalExceptionHandler {
 
     private static ResponseEntity<?> problem(HttpStatus status, String code, String message) {
         return ResponseEntity.status(status).body(body(code, message));
+    }
+
+    private static ResponseEntity<?> fieldProblem(
+            HttpStatus status, String code, String message, List<InvalidField> fields
+    ) {
+        Map<String, Object> body = new LinkedHashMap<>(body(code, message));
+        body.put("fields", fields);
+        return ResponseEntity.status(status).body(body);
+    }
+
+    private static String jsonPath(JsonMappingException ex) {
+        StringBuilder path = new StringBuilder();
+        for (JsonMappingException.Reference step : ex.getPath()) {
+            if (step.getFieldName() == null) {
+                path.append('[').append(step.getIndex()).append(']');
+            } else {
+                path.append(path.isEmpty() ? "" : ".").append(step.getFieldName());
+            }
+        }
+        return path.toString();
+    }
+
+    // a mensagem do Jackson cita classes Java: não vai para o cliente
+    private static String unreadableReason(JsonMappingException ex) {
+        if (ex instanceof MismatchedInputException mismatch
+                && mismatch.getTargetType() != null && mismatch.getTargetType().isEnum()) {
+            return "Valor não permitido. Use um destes: " + Arrays.stream(mismatch.getTargetType().getEnumConstants())
+                    .map(String::valueOf).collect(Collectors.joining(", ")) + ".";
+        }
+        return "Valor em formato inválido.";
     }
 
     // "error" e "message" repetem o texto: o front lê um ou outro
