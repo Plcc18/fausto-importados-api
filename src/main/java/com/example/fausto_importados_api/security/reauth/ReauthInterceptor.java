@@ -2,12 +2,14 @@ package com.example.fausto_importados_api.security.reauth;
 
 import com.example.fausto_importados_api.audit.AuditAction;
 import com.example.fausto_importados_api.audit.AuditService;
+import com.example.fausto_importados_api.concurrency.ApiProblemException;
 import com.example.fausto_importados_api.config.AuthProperties;
 import com.example.fausto_importados_api.model.User;
 import com.example.fausto_importados_api.security.jwt.JwtAuthenticationFilter;
 import com.example.fausto_importados_api.security.jwt.JwtService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
@@ -48,23 +50,11 @@ public class ReauthInterceptor implements HandlerInterceptor {
         if (authentication == null || !(authentication.getPrincipal() instanceof User user)) {
             return true; // sem autenticação quem responde é a camada de segurança (401)
         }
-        // Reautenticar significa confirmar um segundo fator. Sem 2FA em vigor (só nos testes) não há o que confirmar.
-        if (!props.mfaRequired() && !user.isTotpEnabled()) {
+        if (isConfirmed(request, user)) {
             return true;
         }
 
-        Object sessionId = request.getAttribute(JwtAuthenticationFilter.SESSION_ATTRIBUTE);
-        Optional<JwtService.ReauthClaims> claims = jwtService.parseReauthToken(request.getHeader(HEADER));
-        boolean valid = claims.isPresent()
-                && sessionId instanceof UUID sid
-                && claims.get().userId().equals(user.getId())
-                && claims.get().sessionId().equals(sid);
-        if (valid) {
-            return true;
-        }
-
-        audit.recordDenied(AuditAction.REAUTH_REQUIRED, "ENDPOINT",
-                request.getMethod() + " " + request.getRequestURI(), Map.of("reason", "missing_or_invalid_reauth"));
+        recordMissing(request);
         response.setStatus(HttpServletResponse.SC_FORBIDDEN);
         response.setContentType("application/json");
         response.setCharacterEncoding("UTF-8");
@@ -77,5 +67,40 @@ public class ReauthInterceptor implements HandlerInterceptor {
                 }
                 """);
         return false;
+    }
+
+    /**
+     * A mesma exigência de {@link RequiresReauth}, para quando só se sabe durante a operação se ela é sensível (ex.:
+     * editar uma campanha que está publicada).
+     *
+     * @throws ApiProblemException 403 {@code reauth_required}
+     */
+    public void require(HttpServletRequest request) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null && authentication.getPrincipal() instanceof User user
+                && isConfirmed(request, user)) {
+            return;
+        }
+        recordMissing(request);
+        throw new ApiProblemException(HttpStatus.FORBIDDEN, "reauth_required",
+                "Confirme sua identidade para continuar.");
+    }
+
+    private boolean isConfirmed(HttpServletRequest request, User user) {
+        // Reautenticar significa confirmar um segundo fator. Sem 2FA em vigor (só nos testes) não há o que confirmar.
+        if (!props.mfaRequired() && !user.isTotpEnabled()) {
+            return true;
+        }
+        Object sessionId = request.getAttribute(JwtAuthenticationFilter.SESSION_ATTRIBUTE);
+        Optional<JwtService.ReauthClaims> claims = jwtService.parseReauthToken(request.getHeader(HEADER));
+        return claims.isPresent()
+                && sessionId instanceof UUID sid
+                && claims.get().userId().equals(user.getId())
+                && claims.get().sessionId().equals(sid);
+    }
+
+    private void recordMissing(HttpServletRequest request) {
+        audit.recordDenied(AuditAction.REAUTH_REQUIRED, "ENDPOINT",
+                request.getMethod() + " " + request.getRequestURI(), Map.of("reason", "missing_or_invalid_reauth"));
     }
 }

@@ -23,18 +23,12 @@ public final class FieldChecks {
      * @return o texto sem espaços nas pontas, ou nulo se vier vazio
      */
     public String optionalText(String field, String value, int maxLength) {
-        String text = blankToNull(value);
-        if (text == null) {
-            return null;
-        }
-        if (text.indexOf('<') >= 0 || text.indexOf('>') >= 0) {
-            reject(field, "Use só texto: os sinais < e > não são aceitos.");
-        } else if (text.codePoints().anyMatch(FieldChecks::breaksPlainText)) {
-            reject(field, "Remova quebras de linha e caracteres de controle.");
-        } else if (text.codePointCount(0, text.length()) > maxLength) {
-            reject(field, "Use no máximo " + maxLength + " caracteres.");
-        }
-        return text;
+        return text(field, value, maxLength, false);
+    }
+
+    /** Como {@link #optionalText}, mas aceita várias linhas. */
+    public String optionalMultilineText(String field, String value, int maxLength) {
+        return text(field, value, maxLength, true);
     }
 
     /** Como {@link #optionalText}, mas recusa o campo vazio. */
@@ -58,6 +52,26 @@ public final class FieldChecks {
         }
         String stripped = value.strip();
         return stripped.isEmpty() ? null : stripped;
+    }
+
+    private String text(String field, String value, int maxLength, boolean multiline) {
+        String text = blankToNull(value);
+        if (text == null) {
+            return null;
+        }
+        if (text.indexOf('<') >= 0 || text.indexOf('>') >= 0) {
+            reject(field, "Use só texto: os sinais < e > não são aceitos.");
+        } else if (text.codePoints().anyMatch(c -> breaksPlainText(c) && !(multiline && isLineLayout(c)))) {
+            reject(field, multiline ? "Remova os caracteres de controle."
+                    : "Remova quebras de linha e caracteres de controle.");
+        } else if (text.codePointCount(0, text.length()) > maxLength) {
+            reject(field, "Use no máximo " + maxLength + " caracteres.");
+        }
+        return text;
+    }
+
+    private static boolean isLineLayout(int codePoint) {
+        return codePoint == '\n' || codePoint == '\r' || codePoint == '\t';
     }
 
     // controle (inclui \n e o \u0000, que o JSONB recusa), separadores de linha e metades soltas de um par UTF-16

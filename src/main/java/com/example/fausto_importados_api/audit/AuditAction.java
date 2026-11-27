@@ -33,6 +33,10 @@ public enum AuditAction {
     PRODUCT_DELETED,
     STOCK_DECREASED,
 
+    // ── campanhas ──
+    CAMPAIGN_CREATED,
+    CAMPAIGN_UPDATED,
+
     // ── pedidos ──
     ORDER_COMPLETED,
     ORDER_CANCELLED,
