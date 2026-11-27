@@ -2,6 +2,7 @@ package com.example.fausto_importados_api.model;
 
 import com.example.fausto_importados_api.model.campaign.CampaignContent;
 import com.example.fausto_importados_api.model.campaign.CampaignTheme;
+import com.example.fausto_importados_api.model.enums.CampaignPhase;
 import com.example.fausto_importados_api.model.enums.CampaignStatus;
 import com.example.fausto_importados_api.model.enums.CampaignType;
 import jakarta.persistence.*;
@@ -99,6 +100,21 @@ public class Campaign {
     /** E-mail de quem alterou por último. */
     @Column(name = "updated_by", nullable = false, length = 150)
     private String updatedBy;
+
+    /**
+     * Situação no instante informado: início inclusivo, fim exclusivo.
+     *
+     * @return nulo se a campanha não está publicada
+     */
+    public CampaignPhase phaseAt(Instant instant) {
+        if (status != CampaignStatus.PUBLISHED) {
+            return null;
+        }
+        if (instant.isBefore(startsAt)) {
+            return CampaignPhase.SCHEDULED;
+        }
+        return instant.isBefore(endsAt) ? CampaignPhase.ACTIVE : CampaignPhase.EXPIRED;
+    }
 
     public void addCollection(CampaignCollection collection) {
         collection.setCampaign(this);

@@ -1,6 +1,7 @@
 package com.example.fausto_importados_api.repository;
 
 import com.example.fausto_importados_api.model.Campaign;
+import com.example.fausto_importados_api.model.enums.CampaignStatus;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -8,6 +9,8 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -17,6 +20,12 @@ public interface CampaignRepository extends JpaRepository<Campaign, UUID> {
     @EntityGraph(attributePaths = {"collections", "collections.products"})
     @Query("select c from Campaign c where c.id = :id")
     Optional<Campaign> findDetailById(@Param("id") UUID id);
+
+    /**
+     * Campanhas com esse status que ainda não terminaram (fim exclusivo), sem coleções. Com {@code PUBLISHED}, são as
+     * ativas e as agendadas.
+     */
+    List<Campaign> findByStatusAndEndsAtAfter(CampaignStatus status, Instant instant);
 
     /**
      * Trava a linha para alterar a campanha. Coleções e produtos são carregados quando acessados, dentro da mesma

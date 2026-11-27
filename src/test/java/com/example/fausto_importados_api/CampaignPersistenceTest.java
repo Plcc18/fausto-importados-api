@@ -6,6 +6,8 @@ import com.example.fausto_importados_api.model.enums.CampaignStatus;
 import com.example.fausto_importados_api.model.enums.Category;
 import com.example.fausto_importados_api.repository.CampaignRepository;
 import com.example.fausto_importados_api.repository.ProductRepository;
+import com.example.fausto_importados_api.services.ActiveCampaignService;
+import com.example.fausto_importados_api.support.MutableClock;
 import com.example.fausto_importados_api.support.TestPostgres;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -20,6 +22,8 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -61,6 +65,7 @@ class CampaignPersistenceTest {
     @Autowired ProductRepository products;
     @Autowired JdbcTemplate jdbc;
     @Autowired TransactionTemplate tx;
+    @Autowired ActiveCampaignService active;
 
     private final List<UUID> createdCampaigns = new ArrayList<>();
     private final List<UUID> createdProducts = new ArrayList<>();
@@ -171,6 +176,53 @@ class CampaignPersistenceTest {
         assertThat(jdbc.queryForObject("select count(*) from campaign_collection_products where collection_id = ?",
                 Integer.class, collectionId)).isZero();
         assertThat(products.findById(a)).hasValueSatisfying(p -> assertThat(p.getVersion()).isZero());
+    }
+
+    @Test
+    void theCandidatesQueryDropsACampaignExactlyAtItsEnd() {
+        Campaign campaign = complete();
+        campaign.setStatus(CampaignStatus.PUBLISHED);
+        UUID id = save(campaign);
+        Instant end = campaign.getEndsAt();
+
+        assertThat(campaigns.findByStatusAndEndsAtAfter(CampaignStatus.PUBLISHED, end.minus(1, ChronoUnit.MICROS)))
+                .extracting(Campaign::getId).contains(id);
+        assertThat(campaigns.findByStatusAndEndsAtAfter(CampaignStatus.PUBLISHED, end))
+                .extracting(Campaign::getId).doesNotContain(id);
+    }
+
+    @Test
+    void theCampaignOnAirIsResolvedWithItsProducts() {
+        UUID a = product();
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        Campaign campaign = complete();
+        campaign.addCollection(collection("ofertas", 0, a));
+        campaign.setStatus(CampaignStatus.PUBLISHED);
+        campaign.setStartsAt(now.minus(1, ChronoUnit.HOURS));
+        campaign.setEndsAt(now.plus(1, ChronoUnit.HOURS));
+        UUID id = save(campaign);
+
+        ActiveCampaignService.Resolution resolution = active.resolve();
+
+        assertThat(resolution.campaign().getId()).isEqualTo(id);
+        assertThat(productIds(resolution.campaign(), "ofertas")).containsExactly(a);
+        assertThat(resolution.nextChangeAt()).isEqualTo(campaign.getEndsAt());
+    }
+
+    /** O banco guarda microssegundos e arredonda o que passa disso: o relógio não pode "chegar" ao fim antes da hora. */
+    @Test
+    void aClockWithNanosecondsStillSeesTheCampaignRightBeforeItsEnd() {
+        Campaign campaign = complete();
+        campaign.setStatus(CampaignStatus.PUBLISHED);
+        campaign.setPriority(100);
+        UUID id = save(campaign);
+        MutableClock clock = new MutableClock(campaign.getEndsAt().minusNanos(1));
+
+        ActiveCampaignService.Resolution resolution = new ActiveCampaignService(campaigns, clock).resolve();
+
+        assertThat(resolution.campaign()).isNotNull();
+        assertThat(resolution.campaign().getId()).isEqualTo(id);
+        assertThat(resolution.nextChangeAt()).isEqualTo(campaign.getEndsAt());
     }
 
     // ───────────────────────────── helpers ─────────────────────────────
