@@ -1,101 +1,25 @@
 package com.example.fausto_importados_api.controller;
 
 import com.example.fausto_importados_api.model.Campaign;
-import com.example.fausto_importados_api.model.User;
 import com.example.fausto_importados_api.model.enums.CampaignStatus;
 import com.example.fausto_importados_api.model.enums.CampaignType;
 import com.example.fausto_importados_api.model.enums.Role;
-import com.example.fausto_importados_api.repository.AuditLogRepository;
-import com.example.fausto_importados_api.repository.CampaignRepository;
-import com.example.fausto_importados_api.repository.UserRepository;
-import com.example.fausto_importados_api.security.jwt.JwtService;
 import com.example.fausto_importados_api.support.CampaignFixtures;
-import com.example.fausto_importados_api.support.MutableClock;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Primary;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.MediaType;
-import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
-import java.nio.charset.StandardCharsets;
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 import static com.example.fausto_importados_api.support.CampaignFixtures.collection;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
 
-/** As rotas {@code /api/admin/campaigns}, com as exigências de produção para versão e Idempotency-Key ligadas. */
-@SpringBootTest(properties = {
-        "spring.datasource.url=jdbc:h2:mem:campaignapi;DB_CLOSE_DELAY=-1",
-        "app.concurrency.require-version=true",
-        "app.concurrency.require-idempotency-key=true"
-})
-@AutoConfigureMockMvc
-@ActiveProfiles("test")
-class CampaignAdminApiTest {
-
-    private static final Instant NOW = Instant.parse("2026-11-20T12:00:00Z");
-    private static final String BASE = "/api/admin/campaigns";
-    private static final String PASSWORD = "senha-longa-de-teste";
-
-    @TestConfiguration
-    static class TestClockConfig {
-        @Bean
-        @Primary
-        MutableClock testClock() {
-            return new MutableClock(NOW);
-        }
-    }
-
-    @Autowired MockMvc mvc;
-    @Autowired ObjectMapper json;
-    @Autowired CampaignRepository campaigns;
-    @Autowired UserRepository users;
-    @Autowired AuditLogRepository auditLog;
-    @Autowired PasswordEncoder passwordEncoder;
-    @Autowired JwtService jwtService;
-
-    private record Admin(User user, String token) {
-    }
-
-    private record Res(int status, JsonNode body, Map<String, String> headers) {
-        String code() {
-            return body.path("code").asText();
-        }
-
-        List<String> fields() {
-            List<String> names = new ArrayList<>();
-            body.path("fields").forEach(f -> names.add(f.path("field").asText()));
-            return names;
-        }
-    }
-
-    private Admin admin;
-
-    @BeforeEach
-    void setUp() throws Exception {
-        campaigns.deleteAll();
-        admin = signIn(Role.ADMIN);
-    }
+/** Listar, detalhar, criar e editar campanhas ({@code /api/admin/campaigns}). */
+class CampaignAdminApiTest extends CampaignApiTestSupport {
 
     // ───────────────────────────── acesso ─────────────────────────────
 
@@ -363,10 +287,7 @@ class CampaignAdminApiTest {
         String published = stored(CampaignStatus.PUBLISHED, 10, days(1), days(5));
         String draft = stored(CampaignStatus.DRAFT, 10, days(1), days(5));
         Map<String, Object> change = edit(published, "Nome novo");
-        // o admin passa a ter 2FA; o token que já tinha continua válido
-        User user = users.findById(admin.user().getId()).orElseThrow();
-        user.setTotpEnabled(true);
-        users.save(user);
+        String proof = requireSecondFactor();
 
         Res denied = put(published, change);
 
@@ -375,7 +296,6 @@ class CampaignAdminApiTest {
         assertThat(campaigns.findById(UUID.fromString(published)).orElseThrow().getName()).isNotEqualTo("Nome novo");
         assertThat(put(draft, edit(draft, "Rascunho")).status()).isEqualTo(200); // rascunho não pede
 
-        String proof = jwtService.generateReauthToken(user, jwtService.parse(admin.token()).sessionId());
         Res allowed = call("PUT", BASE + "/" + published, admin.token(), change, Map.of("X-Reauth", proof));
 
         assertThat(allowed.status()).isEqualTo(200);
@@ -521,116 +441,13 @@ class CampaignAdminApiTest {
         assertThat(res.fields()).containsExactly(field);
     }
 
-    // ───────────────────────────── helpers ─────────────────────────────
-
-    private static Instant days(int days) {
-        return NOW.plus(days, ChronoUnit.DAYS);
-    }
-
-    private static String newKey() {
-        return UUID.randomUUID().toString();
-    }
-
     private static Map<String, Object> draftBody() {
         return Map.of("name", "Rascunho");
-    }
-
-    private Map<String, Object> complete(String name) {
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("name", name);
-        body.put("description", null);
-        body.put("type", "BLACK_FRIDAY");
-        body.put("priority", 10);
-        body.put("startsAt", "2026-11-27T03:00:00Z");
-        body.put("endsAt", "2026-12-01T03:00:00Z");
-        body.put("theme", CampaignFixtures.theme());
-        body.put("content", CampaignFixtures.content());
-        return body;
-    }
-
-    /** Grava direto no banco: as rotas que publicam, desativam e arquivam ainda não existem. */
-    private String stored(CampaignStatus status, int priority, Instant start, Instant end) {
-        Campaign campaign = CampaignFixtures.complete();
-        campaign.setStatus(status);
-        campaign.setPriority(priority);
-        campaign.setStartsAt(start);
-        campaign.setEndsAt(end);
-        return campaigns.save(campaign).getId().toString();
-    }
-
-    private String named(String name, CampaignStatus status, CampaignType type, Instant start, Instant end) {
-        Campaign campaign = status == CampaignStatus.PUBLISHED ? CampaignFixtures.complete() : CampaignFixtures.draft();
-        campaign.setName(name);
-        campaign.setType(type);
-        campaign.setStatus(status);
-        campaign.setStartsAt(start);
-        campaign.setEndsAt(end);
-        return campaigns.save(campaign).getId().toString();
-    }
-
-    private int version(String id) throws Exception {
-        return get(BASE + "/" + id).body().path("version").asInt();
-    }
-
-    /** O documento atual com outro nome, como o painel enviaria. */
-    private Map<String, Object> edit(String id, String name) throws Exception {
-        @SuppressWarnings("unchecked")
-        Map<String, Object> body = json.convertValue(get(BASE + "/" + id).body(), LinkedHashMap.class);
-        body.put("name", name);
-        body.put("collections", List.of());
-        return body;
     }
 
     private static List<String> ids(Res res) {
         List<String> ids = new ArrayList<>();
         res.body().path("content").forEach(item -> ids.add(item.path("id").asText()));
         return ids;
-    }
-
-    private Res create(Object body) throws Exception {
-        return create(body, newKey());
-    }
-
-    private Res create(Object body, String key) throws Exception {
-        return call("POST", BASE, admin.token(), body, Map.of("Idempotency-Key", key));
-    }
-
-    private Res put(String id, Object body) throws Exception {
-        return call("PUT", BASE + "/" + id, admin.token(), body, Map.of());
-    }
-
-    private Res get(String url) throws Exception {
-        return call("GET", url, admin.token(), null, Map.of());
-    }
-
-    private Res call(String method, String url, String token, Object body, Map<String, String> headers)
-            throws Exception {
-        // URI pronta: um template codificaria de novo o que já vem codificado (%25, %2C)
-        MockHttpServletRequestBuilder builder = request(HttpMethod.valueOf(method), java.net.URI.create(url));
-        if (token != null) {
-            builder.header("Authorization", "Bearer " + token);
-        }
-        headers.forEach(builder::header);
-        if (body != null && !method.equals("GET")) {
-            builder.contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsBytes(body));
-        }
-        var response = mvc.perform(builder).andReturn().getResponse();
-        String text = response.getContentAsString(StandardCharsets.UTF_8);
-        JsonNode node = text.isBlank() ? json.createObjectNode() : json.readTree(text);
-        Map<String, String> received = new LinkedHashMap<>();
-        response.getHeaderNames().forEach(name -> received.put(name, response.getHeader(name)));
-        return new Res(response.getStatus(), node, received);
-    }
-
-    private Admin signIn(Role role) throws Exception {
-        User u = new User();
-        u.setEmail("campanha-" + UUID.randomUUID() + "@test.com");
-        u.setPassword(passwordEncoder.encode(PASSWORD));
-        u.setRole(role);
-        u.setActive(true);
-        User saved = users.save(u);
-        Res res = call("POST", "/auth/login", null, Map.of("email", saved.getEmail(), "password", PASSWORD), Map.of());
-        assertThat(res.status()).as("login").isEqualTo(200);
-        return new Admin(saved, res.body().path("accessToken").asText());
     }
 }

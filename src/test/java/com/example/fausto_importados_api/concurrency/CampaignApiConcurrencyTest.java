@@ -1,6 +1,7 @@
 package com.example.fausto_importados_api.concurrency;
 
 import com.example.fausto_importados_api.model.Campaign;
+import com.example.fausto_importados_api.model.Product;
 import com.example.fausto_importados_api.model.enums.CampaignStatus;
 import com.example.fausto_importados_api.repository.CampaignRepository;
 import com.example.fausto_importados_api.support.CampaignFixtures;
@@ -111,6 +112,77 @@ class CampaignApiConcurrencyTest extends ConcurrencyTestSupport {
         assertThat(ids(wildcard)).isEmpty();
     }
 
+    @Test
+    void onlyOneOfManySimultaneousPublicationsOfTheSamePeriodWins() throws Exception {
+        Session admin = admin();
+        List<UUID> drafts = new ArrayList<>();
+        for (int i = 0; i < THREADS; i++) {
+            drafts.add(save(CampaignStatus.DRAFT, 5, day(10), day(15)));
+        }
+
+        List<Res> results;
+        try (AutoCloseable slow = slowDown("campaigns", "update", 0.2)) {
+            results = concurrently(THREADS, i -> () ->
+                    call("POST", BASE + "/" + drafts.get(i) + "/publish", admin, Map.of("version", 0)));
+        }
+
+        assertThat(countStatus(results, 200)).isEqualTo(1);
+        assertThat(results.stream().filter(r -> r.status() != 200))
+                .hasSize(THREADS - 1)
+                .allSatisfy(r -> {
+                    assertThat(r.status()).isEqualTo(409);
+                    assertThat(r.body().path("code").asText()).isEqualTo("campaign_conflict");
+                });
+    }
+
+    @Test
+    void publishingAndDeletingTheSameDraftAtOnceCannotBothHappen() throws Exception {
+        Session admin = admin();
+        UUID id = save(CampaignStatus.DRAFT, 5, day(10), day(15));
+
+        List<Res> results;
+        try (AutoCloseable slow = slowDown("campaigns", "update or delete", 0.2)) {
+            results = concurrently(2, i -> () -> i == 0
+                    ? call("POST", BASE + "/" + id + "/publish", admin, Map.of("version", 0))
+                    : call("DELETE", BASE + "/" + id + "?version=0", admin, null));
+        }
+
+        Res publish = results.get(0);
+        Res delete = results.get(1);
+        if (publish.status() == 200) {
+            assertThat(delete.status()).isEqualTo(409); // a versão mudou
+            assertThat(campaigns.findById(id).orElseThrow().getStatus()).isEqualTo(CampaignStatus.PUBLISHED);
+        } else {
+            assertThat(delete.status()).isEqualTo(204);
+            assertThat(publish.status()).isEqualTo(404);
+            assertThat(campaigns.findById(id)).isEmpty();
+        }
+    }
+
+    @Test
+    void duplicatingAndDeletingWorkWithCollectionsOnTheRealDatabase() {
+        Session admin = admin();
+        Product a = newProduct(1);
+        Product b = newProduct(1);
+        Campaign original = CampaignFixtures.complete();
+        original.addCollection(CampaignFixtures.collection("ofertas", 0, a.getId(), b.getId()));
+        original.addCollection(CampaignFixtures.collection("presentes", 1, a.getId()));
+        UUID id = campaigns.saveAndFlush(original).getId();
+
+        Res copy = call("POST", BASE + "/" + id + "/duplicate", admin, null,
+                Map.of("Idempotency-Key", UUID.randomUUID().toString()));
+        assertThat(copy.status()).isEqualTo(201);
+        String copyId = copy.body().path("id").asText();
+        assertThat(count("campaign_collections")).isEqualTo(4);
+
+        Res deleted = call("DELETE", BASE + "/" + copyId + "?version=0", admin, null);
+
+        assertThat(deleted.status()).isEqualTo(204);
+        assertThat(count("campaign_collections")).isEqualTo(2);
+        assertThat(count("campaign_collection_products")).isEqualTo(3);
+        assertThat(stockOf(a)).isEqualTo(1);
+    }
+
     // ───────────────────────────── helpers ─────────────────────────────
 
     private UUID save(CampaignStatus status, int priority, Instant start, Instant end) {
@@ -127,6 +199,10 @@ class CampaignApiConcurrencyTest extends ConcurrencyTestSupport {
         @SuppressWarnings("unchecked")
         Map<String, Object> document = json.convertValue(body, LinkedHashMap.class);
         return document;
+    }
+
+    private int count(String table) {
+        return jdbc.queryForObject("select count(*) from " + table, Integer.class);
     }
 
     private static List<String> ids(Res res) {

@@ -22,7 +22,8 @@ public class CampaignInputValidator {
     private static final int MAX_NAME = 80;
     private static final int MAX_DESCRIPTION = 500;
     private static final int MAX_PRIORITY = 100;
-    private static final Duration MAX_DURATION = Duration.ofDays(120);
+    static final Duration MAX_DURATION = Duration.ofDays(120);
+    static final String TOO_LONG = "A campanha pode durar no máximo " + MAX_DURATION.toDays() + " dias.";
 
     private final CampaignContentValidator contentValidator;
 
@@ -54,7 +55,7 @@ public class CampaignInputValidator {
             if (!endsAt.isAfter(startsAt)) {
                 checks.reject("endsAt", "O fim precisa ser depois do início.");
             } else if (Duration.between(startsAt, endsAt).compareTo(MAX_DURATION) > 0) {
-                checks.reject("endsAt", "A campanha pode durar no máximo " + MAX_DURATION.toDays() + " dias.");
+                checks.reject("endsAt", TOO_LONG);
             }
         }
 
