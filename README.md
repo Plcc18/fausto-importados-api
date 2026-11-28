@@ -428,6 +428,10 @@ mvn flyway:migrate
 4. Push: `git push origin feature/nova-feature`
 5. Abra um Pull Request
 
+### Correções futuras
+
+Achou um bug que pode esperar a publicação em produção? Registre em [docs/correcoes-futuras.md](docs/correcoes-futuras.md), em vez de corrigir na hora ou misturar à tarefa em andamento. A regra vale para todo mundo que mexer no repositório; o arquivo diz o que **não** pode esperar (segurança, perda de dados, preços e pedidos, entre outros).
+
 ---
 
 ## Autor

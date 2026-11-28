@@ -59,6 +59,10 @@ Camadas em `com.example.fausto_importados_api`: `controller` → `services` → 
 - `docs/OPERATIONS.md`: variáveis, administradores, 2FA, auditoria, backup e cuidados de implantação.
 - `README.md`: autenticação, rate limiting, administradores e concorrência estão detalhados ali. As seções de estrutura do banco, produtos, pedidos, pagamentos, Swagger, curl e estrutura de pastas estão desatualizadas; confira no código.
 
+## Correções futuras
+- Regra para qualquer pessoa ou agente: bug que pode esperar a publicação em produção (achado em revisão, teste ou uso) não é corrigido na hora nem misturado à task em andamento. Registre em `docs/correcoes-futuras.md`, no repositório onde está o código com problema.
+- Não esperam: segurança, perda de dados (inclusive migration que possa falhar em produção), preço, estoque ou pedido errados, quebra do que já funciona ou do contrato com o front, e o que impede o "Pronto quando" ou faz teste ou build falharem. Critérios e modelo no próprio arquivo.
+
 ## Campanhas sazonais
 - Tasks em `c:\projects\typescript\fausto-importados-web\docs\campanhas-sazonais-tasks.md` (as marcadas com `API` são deste repositório). Faça uma por vez e marque `[x]` só quando atender ao "Pronto quando".
 - Ativar, encerrar ou editar uma campanha nunca altera `price` ou `originalPrice` dos produtos.
