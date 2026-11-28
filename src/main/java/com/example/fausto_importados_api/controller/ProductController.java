@@ -174,6 +174,9 @@ public class ProductController {
             throw new InvalidProductException(message);
         }
 
+        // Antes do upload: uma imagem enviada para um pedido recusado ficaria órfã no Cloudinary
+        ProductService.checkOriginalPrice(dto.price(), dto.originalPrice());
+
         // O upload é lento e externo: acontece antes (e fora) da transação que grava o produto
         String imageUrl = null;
         if (file != null && !file.isEmpty()) {
