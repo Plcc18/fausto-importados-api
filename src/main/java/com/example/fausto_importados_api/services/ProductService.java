@@ -22,6 +22,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
@@ -104,6 +105,7 @@ public class ProductService {
     public Product save(Product product) {
         validateName(product);
         validatePrice(product);
+        checkOriginalPrice(product.getPrice(), product.getOriginalPrice());
         validateCategory(product);
         validateId(product); // fora da transação: numa repetição o objeto já pode ter recebido um id
         return transactions.run(() -> {
@@ -138,7 +140,7 @@ public class ProductService {
             if (imageUrl != null) {
                 product.setImage(imageUrl);
             }
-            return new Change(before, validateAndPersist(product));
+            return new Change(before, validateAndPersist(product, true));
         });
     }
 
@@ -149,7 +151,10 @@ public class ProductService {
 
             Map<String, Object> before = AuditDiff.product(product);
             productMapper.applyPatch(product, dto);
-            Product saved = validateAndPersist(product);
+            // Só quando o PATCH mexe em preço: reativar ou mudar o estoque de um produto antigo fora da regra
+            // continua possível (o PATCH não tem como apagar o preço original; isso se faz pelo PUT, como o painel)
+            boolean pricesChanged = dto.getPrice() != null || dto.getOriginalPrice() != null;
+            Product saved = validateAndPersist(product, pricesChanged);
             transactions.afterCommit(campaignCache::invalidate); // a loja não mostra produto desativado
             return new Change(before, saved);
         });
@@ -209,9 +214,12 @@ public class ProductService {
         }
     }
 
-    private Product validateAndPersist(Product product) {
+    private Product validateAndPersist(Product product, boolean checkOriginalPrice) {
         validateName(product);
         validatePrice(product);
+        if (checkOriginalPrice) {
+            checkOriginalPrice(product.getPrice(), product.getOriginalPrice());
+        }
         validateCategory(product);
         if (Boolean.TRUE.equals(product.getActive())) {
             ensureUnique(product);
@@ -250,6 +258,23 @@ public class ProductService {
         }
         if (product.getPrice().compareTo(BigDecimal.ZERO) <= 0) {
             throw new InvalidProductException("Price must be greater than zero");
+        }
+    }
+
+    static final String ORIGINAL_PRICE_MESSAGE = "O preço original precisa ser maior que o preço.";
+
+    /**
+     * O preço original é o valor riscado da promoção: só faz sentido acima do preço (T35). A loja e o painel usam a
+     * mesma regra ({@code src/lib/pricing.ts} no front). Compara como o banco grava (NUMERIC(10,2), arredondando):
+     * sem isso, 100.004 passaria aqui e seria gravado igual a 100.00. Público para o controller conferir antes de um
+     * upload de imagem, que não teria volta.
+     */
+    public static void checkOriginalPrice(BigDecimal price, BigDecimal originalPrice) {
+        if (price == null || originalPrice == null) {
+            return;
+        }
+        if (originalPrice.setScale(2, RoundingMode.HALF_UP).compareTo(price.setScale(2, RoundingMode.HALF_UP)) <= 0) {
+            throw new InvalidProductException(ORIGINAL_PRICE_MESSAGE);
         }
     }
 

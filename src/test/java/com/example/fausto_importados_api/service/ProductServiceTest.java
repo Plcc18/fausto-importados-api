@@ -3,6 +3,7 @@ package com.example.fausto_importados_api.service;
 import com.example.fausto_importados_api.concurrency.ConcurrencyProperties;
 import com.example.fausto_importados_api.concurrency.Transactions;
 import com.example.fausto_importados_api.concurrency.Versions;
+import com.example.fausto_importados_api.dto.auth.ProductUpdateDTO;
 import com.example.fausto_importados_api.mapper.ProductMapper;
 import com.example.fausto_importados_api.model.Product;
 import com.example.fausto_importados_api.model.enums.Category;
@@ -144,6 +145,64 @@ class ProductServiceTest {
         assertThatThrownBy(() -> productService.save(product))
                 .isInstanceOf(InvalidProductException.class)
                 .hasMessage("Price must be greater than zero");
+    }
+
+    @Test
+    void shouldRejectOriginalPriceEqualToOrBelowPrice() {
+        // 100.004 é gravado como 100.00 (NUMERIC(10,2)): igual ao preço, então também é recusado
+        for (String originalPrice : new String[]{"100", "100.00", "99.99", "100.004"}) {
+            product.setOriginalPrice(new BigDecimal(originalPrice));
+
+            assertThatThrownBy(() -> productService.save(product))
+                    .as("preço original %s com preço 100", originalPrice)
+                    .isInstanceOf(InvalidProductException.class)
+                    .hasMessage("O preço original precisa ser maior que o preço.");
+        }
+        verify(productRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void shouldAcceptOriginalPriceAbovePriceOrAbsent() {
+        when(productRepository.existsActiveDuplicate(any(), any(), any(), any())).thenReturn(false);
+        when(productRepository.saveAndFlush(any(Product.class))).thenAnswer(call -> call.getArgument(0));
+
+        product.setOriginalPrice(new BigDecimal("100.01"));
+        assertThat(productService.save(product).getOriginalPrice()).isEqualByComparingTo("100.01");
+
+        product.setOriginalPrice(null);
+        assertThat(productService.save(product).getOriginalPrice()).isNull();
+    }
+
+    @Test
+    void shouldRejectPartialUpdateThatLeavesOriginalPriceBelowPrice() {
+        UUID id = UUID.randomUUID();
+        product.setId(id);
+        product.setActive(true);
+        product.setOriginalPrice(new BigDecimal("150"));
+        when(productRepository.findByIdForUpdate(id)).thenReturn(Optional.of(product));
+        ProductUpdateDTO patch = new ProductUpdateDTO();
+        patch.setPrice(new BigDecimal("150")); // só o preço muda: passa a ser igual ao preço original
+
+        assertThatThrownBy(() -> productService.updatePartial(id, patch))
+                .isInstanceOf(InvalidProductException.class)
+                .hasMessage("O preço original precisa ser maior que o preço.");
+        verify(productRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void shouldLetAPartialUpdateWithoutPricesThroughForALegacyProductOutsideTheRule() {
+        UUID id = UUID.randomUUID();
+        product.setId(id);
+        product.setActive(false);
+        product.setOriginalPrice(new BigDecimal("80")); // gravado antes da T35
+        when(productRepository.findByIdForUpdate(id)).thenReturn(Optional.of(product));
+        when(productRepository.existsActiveDuplicate(any(), any(), any(), any())).thenReturn(false);
+        when(productRepository.saveAndFlush(any(Product.class))).thenAnswer(call -> call.getArgument(0));
+        ProductUpdateDTO patch = new ProductUpdateDTO();
+        patch.setActive(true); // reativar não mexe em preço
+        patch.setStockQuantity(4);
+
+        assertThat(productService.updatePartial(id, patch).product().getActive()).isTrue();
     }
 
     @Test
